@@ -1,33 +1,6 @@
+import { type CreateLedgerEntryDto, type LedgerEntryState } from "../../model/dto/wallet.dto";
+import { LedgerDirection } from "../../model/type/wallet.type";
 import type { Money } from "../common/money";
-
-export enum LedgerDirection
-{
-    Debit = "DEBIT",
-    Credit = "CREDIT",
-}
-
-export interface CreateLedgerEntryProps
-{
-    id: string;
-    walletId: string;
-    transactionId: string;
-    direction: LedgerDirection;
-    money: Money;
-    balanceBefore: Money;
-    balanceAfter: Money;
-}
-
-export interface LedgerEntryState
-{
-    id: string;
-    walletId: string;
-    transactionId: string;
-    direction: LedgerDirection;
-    money: Money;
-    balanceBefore: Money;
-    balanceAfter: Money;
-    createdAt: Date;
-}
 
 export class WalletLedgerEntry
 {
@@ -42,19 +15,19 @@ export class WalletLedgerEntry
         public readonly createdAt: Date,
     ) {}
 
-    public static create(props: CreateLedgerEntryProps): WalletLedgerEntry
+    public static create(dto: CreateLedgerEntryDto): WalletLedgerEntry
     {
         const entry = new WalletLedgerEntry(
-            props.id,
-            props.walletId,
-            props.transactionId,
-            props.direction,
-            props.money,
-            props.balanceBefore,
-            props.balanceAfter, new Date()
+            dto.id,
+            dto.walletId,
+            dto.transactionId,
+            dto.direction,
+            dto.money,
+            dto.balanceBefore,
+            dto.balanceAfter, new Date()
         );
 
-        if (!entry.isBalanced()) throw new Error(`Invariante violada: before (${props.balanceBefore}) ± money (${props.money}) !== afeter (${props.balanceAfter})`);
+        if (!entry.isBalanced()) throw new Error(`Invariante violada: before (${dto.balanceBefore}) ± money (${dto.money}) !== afeter (${dto.balanceAfter})`);
 
         return entry;
     }

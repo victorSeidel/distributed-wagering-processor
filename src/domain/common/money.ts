@@ -1,12 +1,7 @@
 import Decimal from "decimal.js";
+import type { Money as MoneyType } from "../../model/type/money.type";
 
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
-
-export interface MoneyProps
-{
-    amount: string;
-    currency: string;
-}
 
 export class Money
 {
@@ -15,7 +10,7 @@ export class Money
         public readonly currency: string
     ) {}
 
-    public static from(props: MoneyProps): Money
+    public static from(props: MoneyType): Money
     {
         const { amount, currency } = props;
 
@@ -99,7 +94,7 @@ export class Money
         return this.currency === other.currency && this.value.equals(other.value);
     }
 
-    public toJSON(): MoneyProps
+    public toJSON(): MoneyType
     {
         return {
             amount: this.toString(),

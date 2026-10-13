@@ -1,5 +1,5 @@
 import { defineEntity, p } from "@mikro-orm/core";
-import { LedgerDirection } from "../../../domain/wallet/wallet-ledger-entry";
+import { LedgerDirection } from "../../../model/type/wallet.type";
 
 export const WalletLedgerEntrySchema = defineEntity({
     name: "WalletLedgerEntryEntity",

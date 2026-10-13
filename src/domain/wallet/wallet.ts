@@ -1,15 +1,5 @@
+import type { OpenWalletDto, WalletState } from "../../model/dto/wallet.dto";
 import type { Money } from "../common/money";
-
-export interface WalletState
-{
-    id: string;
-    playerId: string;
-    currency: string;
-    balance: Money;
-    version: number;
-    createdAt: Date;
-    updatedAt: Date;
-}
 
 export class Wallet
 {
@@ -23,14 +13,14 @@ export class Wallet
         private _updatedAt: Date,
     ) {}
 
-    public static open(props: { id: string; playerId: string; initialBalance: Money; }): Wallet
+    public static open(dto: OpenWalletDto): Wallet
     {
         const now = new Date();
         return new Wallet(
-            props.id,
-            props.playerId,
-            props.initialBalance.currency,
-            props.initialBalance,
+            dto.id,
+            dto.playerId,
+            dto.initialBalance.currency,
+            dto.initialBalance,
             1,
             now,
             now

@@ -1,5 +1,5 @@
 import { defineEntity, p } from "@mikro-orm/core";
-import { WagerTransactionType, WagerTransactionStatus, FailureCode } from "../../../domain/wager/wager-transaction";
+import { WagerFailureCode, WagerTransactionKind, WagerTransactionStatus } from "../../../model/entity/wager.entity";
 
 export const WagerTransactionSchema = defineEntity({
     name: "WagerTransactionEntity",
@@ -18,7 +18,7 @@ export const WagerTransactionSchema = defineEntity({
         roundId: p.string(),
         gameId: p.string(),
 
-        type: p.enum(() => WagerTransactionType),
+        kind: p.enum(() => WagerTransactionKind),
 
         amount: p.decimal().precision(18).scale(2),
         currency: p.string().length(3),
@@ -27,7 +27,7 @@ export const WagerTransactionSchema = defineEntity({
         referenceTransactionId: p.uuid().nullable(),
 
         status: p.enum(() => WagerTransactionStatus).default(WagerTransactionStatus.Pending).index(),
-        failureCode: p.enum(() => FailureCode).nullable(),
+        failureCode: p.enum(() => WagerFailureCode).nullable(),
 
         processedAt: p.datetime().nullable(),
         createdAt: p.datetime().onCreate(() => new Date()),
