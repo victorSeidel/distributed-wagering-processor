@@ -27,4 +27,7 @@ export enum WagerFailureCode
     ReversalWouldProduceNegativeBalance = "REVERSAL_WOULD_PRODUCE_NEGATIVE_BALANCE",
     AmountMismatch = "AMOUNT_MISMATCH",
     IdempotencyConflict = "IDEMPOTENCY_CONFLICT",
+    ReferenceNotProcessed = "REFERENCE_NOT_PROCESSED",
+    ReferenceMismatch = "REFERENCE_MISMATCH",
+    PlayerMismatch = "PLAYER_MISMATCH",
 }

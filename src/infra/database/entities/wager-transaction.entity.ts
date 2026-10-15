@@ -24,6 +24,7 @@ export const WagerTransactionSchema = defineEntity({
 
         amount: p.decimal().precision(18).scale(2),
         currency: p.string().length(3),
+        balanceAfter: p.decimal().precision(18).scale(2).nullable(),
 
         status: p.enum(() => WagerTransactionStatus).default(WagerTransactionStatus.Pending),
         failureCode: p.enum(() => WagerFailureCode).nullable(),

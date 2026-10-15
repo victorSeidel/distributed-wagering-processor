@@ -66,6 +66,7 @@ export class PendingReferenceRetryWorker implements OnModuleInit, OnModuleDestro
                         txEntity.status = WagerTransactionStatus.Rejected;
                         txEntity.failureCode = WagerFailureCode.ReferenceNotFound;
                         txEntity.processedAt = now;
+                        txEntity.balanceAfter = null;
 
                         const rejectedEvent = new WagerTransactionRejected({
                             aggregateId: txEntity.id,
@@ -111,6 +112,7 @@ export class PendingReferenceRetryWorker implements OnModuleInit, OnModuleDestro
                         txEntity.status = tx.status;
                         txEntity.failureCode = tx.failureCode;
                         txEntity.processedAt = tx.processedAt;
+                        txEntity.balanceAfter = wallet.balance.toString();
                         return;
                     }
 
@@ -125,6 +127,7 @@ export class PendingReferenceRetryWorker implements OnModuleInit, OnModuleDestro
                             txEntity.status = tx.status;
                             txEntity.failureCode = tx.failureCode;
                             txEntity.processedAt = tx.processedAt;
+                        txEntity.balanceAfter = wallet.balance.toString();
                             return;
                         }
 
@@ -140,6 +143,7 @@ export class PendingReferenceRetryWorker implements OnModuleInit, OnModuleDestro
                     txEntity.status = tx.status;
                     txEntity.referenceTransactionId = refTx.id;
                     txEntity.processedAt = now;
+                    txEntity.balanceAfter = wallet.balance.toString();
 
                     walletEntity.balance = wallet.balance.toString();
                     walletEntity.version = wallet.version;

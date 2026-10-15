@@ -1,7 +1,7 @@
 import { Money } from "../common/money";
 
 import type { CreateWagerTransactionDto, WagerTransactionState } from "../../model/dto/wager.dto";
-import { WagerTransactionKind, type WagerFailureCode, WagerTransactionStatus } from "../../model/entity/wager.entity";
+import { WagerTransactionKind, WagerFailureCode, WagerTransactionStatus } from "../../model/entity/wager.entity";
 import { LedgerDirection } from "../../model/type/wallet.type";
 
 export class WagerTransaction
@@ -129,6 +129,36 @@ export class WagerTransaction
     public matchesPayload(payloadHash: string): boolean
     {
         return this.payloadHash === payloadHash;
+    }
+
+    public evaluateReference(reference: WagerTransaction): WagerFailureCode | undefined
+    {
+        if (reference.status !== WagerTransactionStatus.Processed) return WagerFailureCode.ReferenceNotProcessed;
+
+        if (reference.playerId !== this.playerId || reference.walletId !== this.walletId ||
+            reference.roundId !== this.roundId || reference.money.currency !== this.money.currency)
+            return WagerFailureCode.ReferenceMismatch;
+
+        if (!WagerTransaction.allowedReferenceKinds(this.kind).includes(reference.kind)) return WagerFailureCode.InvalidReferenceType;
+
+        if (!reference.money.equals(this.money)) return WagerFailureCode.AmountMismatch;
+
+        return undefined;
+    }
+
+    public isReferenceUnresolved(reference: WagerTransaction): boolean
+    {
+        return reference.status === WagerTransactionStatus.Pending || reference.status === WagerTransactionStatus.PendingReference;
+    }
+
+    private static allowedReferenceKinds(kind: WagerTransactionKind): WagerTransactionKind[]
+    {
+        switch (kind)
+        {
+            case WagerTransactionKind.Refund: return [WagerTransactionKind.Bet];
+            case WagerTransactionKind.Rollback: return [WagerTransactionKind.Bet, WagerTransactionKind.Win, WagerTransactionKind.Refund];
+            default: return [];
+        }
     }
 
     public ledgerDirectionFor(reference?: WagerTransaction): LedgerDirection

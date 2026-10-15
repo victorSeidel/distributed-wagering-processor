@@ -122,13 +122,14 @@ export class ProcessWagerUseCase
             const existingTx = DatabaseMapper.toWagerDomain(existingTxEntity);
             if (!existingTx.matchesPayload(currentPayloadHash)) throw new IdempotencyConflictError(idempotencyKey);
 
-            const walletEntity = await em.findOne(WalletEntity, { id: existingTx.walletId });
-            const currentBalance = walletEntity ? Money.from({ amount: walletEntity.balance, currency: walletEntity.currency }).toJSON() : input.money;
+            const balance = existingTxEntity.balanceAfter
+                ? Money.from({ amount: existingTxEntity.balanceAfter, currency: existingTxEntity.currency }).toJSON()
+                : await this.currentBalance(em, existingTx.walletId, input.money);
 
             return {
                 transactionId: existingTx.id,
                 status: existingTx.status,
-                balance: currentBalance,
+                balance,
                 idempotentReplay: true,
                 failureCode: existingTx.failureCode,
             };
@@ -156,54 +157,25 @@ export class ProcessWagerUseCase
             referenceExternalTransactionId: input.referenceExternalTransactionId,
         });
 
+        if (wallet.playerId !== input.playerId)
+        {
+            transaction.reject(WagerFailureCode.PlayerMismatch);
+            return this.persistRejection(em, wallet, transaction, correlationId);
+        }
+
         let referenceTx: WagerTransaction | undefined;
 
         if (transaction.requiresReference())
         {
             const refEntity = await em.findOne(WagerTransactionEntity, { providerId: input.providerId, externalTransactionId: input.referenceExternalTransactionId });
-            if (!refEntity)
+            referenceTx = refEntity ? DatabaseMapper.toWagerDomain(refEntity) : undefined;
+
+            if (!referenceTx || transaction.isReferenceUnresolved(referenceTx)) return this.persistPendingReference(em, wallet, transaction, correlationId);
+
+            const referenceFailure = transaction.evaluateReference(referenceTx);
+            if (referenceFailure)
             {
-                transaction.markPendingReference();
-                em.persist(DatabaseMapper.toWagerEntity(transaction));
-
-                const pendingEvent = new WagerTransactionPendingReference({
-                    aggregateId: transaction.id,
-                    correlationId,
-                    data: {
-                        transactionId: transaction.id,
-                        providerId: transaction.providerId,
-                        externalTransactionId: transaction.externalTransactionId,
-                        referenceExternalTransactionId: input.referenceExternalTransactionId!,
-                        walletId: wallet.id,
-                        playerId: wallet.playerId,
-                        kind: transaction.kind,
-                    },
-                });
-
-                this.enqueueOutbox(em, pendingEvent);
-
-                await em.flush();
-
-                return {
-                    transactionId: transaction.id,
-                    status: transaction.status,
-                    balance: wallet.balance.toJSON(),
-                    idempotentReplay: false,
-                };
-            }
-
-            referenceTx = DatabaseMapper.toWagerDomain(refEntity);
-
-            if (referenceTx.playerId !== input.playerId || referenceTx.walletId !== input.walletId ||
-                referenceTx.roundId !== input.roundId || !referenceTx.money.equals(inputMoney))
-            {
-                transaction.reject(WagerFailureCode.AmountMismatch);
-                return this.persistRejection(em, wallet, transaction, correlationId);
-            }
-
-            if (input.kind === WagerTransactionKind.Refund && referenceTx.kind !== WagerTransactionKind.Bet)
-            {
-                transaction.reject(WagerFailureCode.InvalidReferenceType);
+                transaction.reject(referenceFailure);
                 return this.persistRejection(em, wallet, transaction, correlationId);
             }
 
@@ -277,7 +249,7 @@ export class ProcessWagerUseCase
         }
 
         transaction.markProcessed(referenceTx?.id, new Date());
-        em.persist(DatabaseMapper.toWagerEntity(transaction));
+        this.persistTransaction(em, transaction, wallet.balance);
 
         if (transaction.affectsBalance())
         {
@@ -346,9 +318,38 @@ export class ProcessWagerUseCase
         };
     }
 
+    private async persistPendingReference(em: EntityManager, wallet: Wallet, transaction: WagerTransaction, correlationId: string): Promise<ProcessWagerOutput>
+    {
+        transaction.markPendingReference();
+        this.persistTransaction(em, transaction, wallet.balance);
+
+        this.enqueueOutbox(em, new WagerTransactionPendingReference({
+            aggregateId: transaction.id,
+            correlationId,
+            data: {
+                transactionId: transaction.id,
+                providerId: transaction.providerId,
+                externalTransactionId: transaction.externalTransactionId,
+                referenceExternalTransactionId: transaction.referenceExternalTransactionId!,
+                walletId: wallet.id,
+                playerId: wallet.playerId,
+                kind: transaction.kind,
+            },
+        }));
+
+        await em.flush();
+
+        return {
+            transactionId: transaction.id,
+            status: transaction.status,
+            balance: wallet.balance.toJSON(),
+            idempotentReplay: false,
+        };
+    }
+
     private async persistRejection(em: EntityManager, wallet: Wallet, transaction: WagerTransaction, correlationId: string): Promise<ProcessWagerOutput>
     {
-        em.persist(DatabaseMapper.toWagerEntity(transaction));
+        this.persistTransaction(em, transaction, wallet.balance);
 
         const rejectedEvent = new WagerTransactionRejected({
             aggregateId: transaction.id,
@@ -375,6 +376,19 @@ export class ProcessWagerUseCase
             idempotentReplay: false,
             failureCode: transaction.failureCode,
         };
+    }
+
+    private persistTransaction(em: EntityManager, transaction: WagerTransaction, balanceAfter: Money): void
+    {
+        const entity = DatabaseMapper.toWagerEntity(transaction);
+        entity.balanceAfter = balanceAfter.toString();
+        em.persist(entity);
+    }
+
+    private async currentBalance(em: EntityManager, walletId: string, fallback: MoneyType): Promise<MoneyType>
+    {
+        const walletEntity = await em.findOne(WalletEntity, { id: walletId });
+        return walletEntity ? Money.from({ amount: walletEntity.balance, currency: walletEntity.currency }).toJSON() : fallback;
     }
 
     private enqueueOutbox(em: EntityManager, event: { aggregateId: string; eventType: string; toJSON: () => Record<string, unknown> }): void

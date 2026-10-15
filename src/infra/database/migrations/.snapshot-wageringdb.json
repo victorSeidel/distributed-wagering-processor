@@ -328,6 +328,23 @@
           "enumItems": [],
           "mappedType": "decimal"
         },
+        "balance_after": {
+          "name": "balance_after",
+          "type": "numeric(18,2)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": 18,
+          "scale": 2,
+          "default": null,
+          "comment": null,
+          "collation": null,
+          "enumItems": [],
+          "mappedType": "decimal"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamptz(6)",
@@ -401,7 +418,10 @@
             "INVALID_CURRENCY",
             "REVERSAL_WOULD_PRODUCE_NEGATIVE_BALANCE",
             "AMOUNT_MISMATCH",
-            "IDEMPOTENCY_CONFLICT"
+            "IDEMPOTENCY_CONFLICT",
+            "REFERENCE_NOT_PROCESSED",
+            "REFERENCE_MISMATCH",
+            "PLAYER_MISMATCH"
           ],
           "mappedType": "enum"
         },
@@ -724,8 +744,8 @@
         },
         {
           "name": "wager_transactions_failure_code_check",
-          "expression": "\"failure_code\" in ('INSUFFICIENT_FUNDS', 'REFERENCE_NOT_FOUND', 'REFERENCE_ALREADY_REVERSED', 'INVALID_REFERENCE_TYPE', 'INVALID_CURRENCY', 'REVERSAL_WOULD_PRODUCE_NEGATIVE_BALANCE', 'AMOUNT_MISMATCH', 'IDEMPOTENCY_CONFLICT')",
-          "definition": "check (\"failure_code\" in ('INSUFFICIENT_FUNDS', 'REFERENCE_NOT_FOUND', 'REFERENCE_ALREADY_REVERSED', 'INVALID_REFERENCE_TYPE', 'INVALID_CURRENCY', 'REVERSAL_WOULD_PRODUCE_NEGATIVE_BALANCE', 'AMOUNT_MISMATCH', 'IDEMPOTENCY_CONFLICT'))",
+          "expression": "\"failure_code\" in ('INSUFFICIENT_FUNDS', 'REFERENCE_NOT_FOUND', 'REFERENCE_ALREADY_REVERSED', 'INVALID_REFERENCE_TYPE', 'INVALID_CURRENCY', 'REVERSAL_WOULD_PRODUCE_NEGATIVE_BALANCE', 'AMOUNT_MISMATCH', 'IDEMPOTENCY_CONFLICT', 'REFERENCE_NOT_PROCESSED', 'REFERENCE_MISMATCH', 'PLAYER_MISMATCH')",
+          "definition": "check (\"failure_code\" in ('INSUFFICIENT_FUNDS', 'REFERENCE_NOT_FOUND', 'REFERENCE_ALREADY_REVERSED', 'INVALID_REFERENCE_TYPE', 'INVALID_CURRENCY', 'REVERSAL_WOULD_PRODUCE_NEGATIVE_BALANCE', 'AMOUNT_MISMATCH', 'IDEMPOTENCY_CONFLICT', 'REFERENCE_NOT_PROCESSED', 'REFERENCE_MISMATCH', 'PLAYER_MISMATCH'))",
           "columnName": "failure_code"
         },
         {
