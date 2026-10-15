@@ -10,6 +10,9 @@ export const InboxMessageSchema = defineEntity({
         receivedAt: p.datetime().onCreate(() => new Date()),
         processedAt: p.datetime().nullable(),
     },
+    uniques: [
+        { name: "uk_inbox_messages_consumer_message", properties: ["consumerName", "messageId"] },
+    ]
 });
 
 export class InboxMessageEntity extends InboxMessageSchema.class {}

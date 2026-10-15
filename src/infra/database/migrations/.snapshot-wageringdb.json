@@ -15,7 +15,7 @@
           "autoincrement": false,
           "primary": true,
           "nullable": false,
-          "unique": false,
+          "unique": true,
           "length": 255,
           "precision": null,
           "scale": null,
@@ -104,6 +104,17 @@
           "constraint": true,
           "keyName": "inbox_messages_pkey",
           "primary": true,
+          "unique": true
+        },
+        {
+          "columnNames": [
+            "consumer_name",
+            "message_id"
+          ],
+          "composite": true,
+          "constraint": true,
+          "keyName": "uk_inbox_messages_consumer_message",
+          "primary": false,
           "unique": true
         }
       ],

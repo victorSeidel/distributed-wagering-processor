@@ -1,13 +1,12 @@
 import { Injectable, type OnModuleInit, type OnModuleDestroy, Logger } from "@nestjs/common";
-import { EntityManager } from "@mikro-orm/postgresql";
 
 import { ReceiveMessageCommand, DeleteMessageCommand, ChangeMessageVisibilityCommand, type Message, } from "@aws-sdk/client-sqs";
 
-import { InboxMessageEntity } from "../database/entities/messaging.entity";
 import { hashPayload } from "../../domain/common/canonical-json";
+import { InboxPayloadMismatchError } from "../../domain/exception/inbox-payload-mismatch-error";
 
 import { SqsService } from "./sqs-client.service";
-import type { ProcessWagerInput, ProcessWagerUseCase } from "../../application/usecase/process-wager.usecase";
+import type { InboxContext, ProcessWagerInput, ProcessWagerUseCase } from "../../application/usecase/process-wager.usecase";
 
 export interface SqsWagerMessageEnvelope
 {
@@ -27,7 +26,6 @@ export class SqsConsumerService implements OnModuleInit, OnModuleDestroy
 
     constructor(
         private readonly sqsService: SqsService,
-        private readonly em: EntityManager,
         private readonly processWagerUseCase: ProcessWagerUseCase,
     ) {}
 
@@ -50,7 +48,7 @@ export class SqsConsumerService implements OnModuleInit, OnModuleDestroy
     private async startPollingLoop(): Promise<void>
     {
         while (this.isRunning)
-            {
+        {
             try
             {
                 this.isPolling = true;
@@ -104,50 +102,33 @@ export class SqsConsumerService implements OnModuleInit, OnModuleDestroy
         }
 
         const { messageId, data } = envelope;
-        const payloadHash = hashPayload(data as unknown as Record<string, unknown>);
-        const forkEm = this.em.fork();
+
+        if (!messageId || !data)
+        {
+            this.logger.error(`Envelope sem messageId/data: ${message.Body}. Deletando da fila.`);
+            await this.ackMessage(queueUrl, message.ReceiptHandle);
+            return;
+        }
+
+        const inbox: InboxContext = {
+            consumerName: this.consumerName,
+            messageId,
+            payloadHash: hashPayload(data as unknown as Record<string, unknown>),
+        };
 
         try
         {
-            const alreadyProcessed = await forkEm.transactional(async (em) =>
-            {
-                const existingInbox = await em.findOne(InboxMessageEntity, { consumerName: this.consumerName, messageId });
-                if (existingInbox && existingInbox.processedAt) return true;
-
-                if (!existingInbox)
-                {
-                    const inboxEntry = new InboxMessageEntity();
-                    inboxEntry.consumerName = this.consumerName;
-                    inboxEntry.messageId = messageId;
-                    inboxEntry.payloadHash = payloadHash;
-                    inboxEntry.receivedAt = new Date();
-                    em.persist(inboxEntry);
-                }
-
-                return false;
-            });
-
-            if (alreadyProcessed)
-            {
-                this.logger.warn(`Mensagem duplicada detectada pelo Inbox: ${messageId}. Enviando ACK.`);
-                await this.ackMessage(queueUrl, message.ReceiptHandle);
-                return;
-            }
-
-            await this.processWagerUseCase.execute(data);
-
-            await forkEm.transactional(async (em) =>
-            {
-                const inbox = await em.findOne(InboxMessageEntity, { consumerName: this.consumerName, messageId });
-                if (inbox) inbox.processedAt = new Date();
-            });
-
+            const result = await this.processWagerUseCase.execute(data, inbox);
+            if (result.idempotentReplay) this.logger.warn(`Mensagem duplicada detectada: ${messageId}. Enviando ACK`);
             await this.ackMessage(queueUrl, message.ReceiptHandle);
         }
         catch (err: unknown)
         {
             const errorMsg = err instanceof Error ? err.message : String(err);
-            this.logger.error(`Erro ao processar mensagem ${messageId}: ${errorMsg}`);
+
+            if (err instanceof InboxPayloadMismatchError) this.logger.error(`Mensagem ${messageId} com hash divergente do inbox: ${errorMsg}`);
+            else this.logger.error(`Erro ao processar mensagem ${messageId}: ${errorMsg}`);
+
             try
             {
                 await this.sqsService.getClient().send(
