@@ -24,10 +24,11 @@ export class OutboxRelayWorker implements OnModuleInit, OnModuleDestroy
         this.logger.log("Outbox Relay Worker inicializado com SKIP LOCKED.");
     }
 
-    onModuleDestroy()
+    async onModuleDestroy()
     {
         this.isRunning = false;
         if (this.intervalRef) clearInterval(this.intervalRef);
+        while (this.isProcessing) await new Promise((resolve) => setTimeout(resolve, 50));
         this.logger.log("Outbox Relay Worker encerrado com segurança.");
     }
 
@@ -42,7 +43,7 @@ export class OutboxRelayWorker implements OnModuleInit, OnModuleDestroy
         {
             await forkEm.transactional(async (em) => 
             {
-                const pendingRows = await em.getConnection().execute<{ id: string }[]>
+                const pendingRows = await em.execute<{ id: string }[]>
                     (`SELECT id FROM outbox_messages WHERE published_at IS NULL AND next_attempt_at <= ? ORDER BY occurred_at ASC LIMIT ? FOR UPDATE SKIP LOCKED`,
                         [new Date(), this.batchSize],
                 );

@@ -1,3 +1,5 @@
+import type { OutboxMessageState } from "../../model/dto/messaging.dto";
+
 export class OutboxMessage
 {
     private constructor(
@@ -11,27 +13,12 @@ export class OutboxMessage
         private _publishedAt?: Date,
     ) {}
 
-    public static enqueue(
-        id: string,
-        aggregateId: string,
-        eventType: string,
-        payload: Record<string, unknown>,
-        occurredAt: Date = new Date(),
-    ): OutboxMessage
+    public static enqueue(id: string, aggregateId: string, eventType: string, payload: Record<string, unknown>, occurredAt: Date = new Date()): OutboxMessage
     {
         return new OutboxMessage(id, aggregateId, eventType, payload, occurredAt, 0, occurredAt);
     }
 
-    public static rehydrate(state: {
-        id: string;
-        aggregateId: string;
-        eventType: string;
-        payload: Record<string, unknown>;
-        occurredAt: Date;
-        attempts: number;
-        nextAttemptAt: Date;
-        publishedAt?: Date;
-    }): OutboxMessage
+    public static rehydrate(state: OutboxMessageState): OutboxMessage
     {
         return new OutboxMessage(
             state.id,

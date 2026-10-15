@@ -1,5 +1,6 @@
 import Decimal from "decimal.js";
 import type { Money as MoneyType } from "../../model/type/money.type";
+import { CurrencyConflictError, InvalidInputError } from "./errors";
 
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
 
@@ -14,11 +15,11 @@ export class Money
     {
         const { amount, currency } = props;
 
-        if (!currency || currency.trim().length !== 3) throw new Error(`Moeda inválida: ${currency}. Deve ser ISO-4217`);
-        if (typeof amount !== "string" || !amount.trim()) throw new Error("Amount monetário deve ser uma string não vazia");
+        if (typeof currency !== "string" || currency.trim().length !== 3) throw new InvalidInputError(`Moeda inválida: ${currency}. Deve ser ISO-4217`);
+        if (typeof amount !== "string" || !amount.trim()) throw new InvalidInputError("Amount monetário deve ser uma string não vazia");
 
         const decimalPattern = /^\d+(\.\d{1,2})?$/;
-        if (!decimalPattern.test(amount.trim())) throw new Error(`Formato inválido para amount: "${amount}". Requer string decimal positiva com até 2 casas`);
+        if (!decimalPattern.test(amount.trim())) throw new InvalidInputError(`Formato inválido para amount: "${amount}". Requer string decimal positiva com até 2 casas`);
 
         let parsed: Decimal;
         try
@@ -27,10 +28,10 @@ export class Money
         }
         catch
         {
-            throw new Error(`Falha ao instanciar Decimal a partir de "${amount}"`);
+            throw new InvalidInputError(`Falha ao instanciar Decimal a partir de "${amount}"`);
         }
 
-        if (!parsed.isFinite()) throw new Error("Valores monetários não podem ser NaN ou Infinity.");
+        if (!parsed.isFinite()) throw new InvalidInputError("Valores monetários não podem ser NaN ou Infinity.");
 
         return new Money(parsed, currency.toUpperCase());
     }
@@ -114,6 +115,6 @@ export class Money
 
     private assertSameCurrency(other: Money): void 
     {
-        if (this.currency !== other.currency) throw new Error(`Conflito de moedas: operação entre ${this.currency} e ${other.currency}.`);
+        if (this.currency !== other.currency) throw new CurrencyConflictError(`Conflito de moedas: operação entre ${this.currency} e ${other.currency}.`);
     }
 }

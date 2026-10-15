@@ -1,4 +1,5 @@
 import { Money } from "../common/money";
+import { InvalidInputError, InvalidTransactionStateError } from "../common/errors";
 
 import type { CreateWagerTransactionDto, WagerTransactionState } from "../../model/dto/wager.dto";
 import { WagerTransactionKind, WagerFailureCode, WagerTransactionStatus } from "../../model/entity/wager.entity";
@@ -29,7 +30,7 @@ export class WagerTransaction
     public static create(dto: CreateWagerTransactionDto): WagerTransaction
     {
         if ((dto.kind === WagerTransactionKind.Refund || dto.kind === WagerTransactionKind.Rollback) && !dto.referenceExternalTransactionId)
-            throw new Error(`Operações de ${dto.kind} exigem referenceExternalTransactionId`);
+            throw new InvalidInputError(`Operações de ${dto.kind} exigem referenceExternalTransactionId`);
 
         return new WagerTransaction(
             dto.id,
@@ -175,19 +176,19 @@ export class WagerTransaction
 
             case WagerTransactionKind.Rollback:
             {
-                if (!reference) throw new Error("Rollback exige a transação de referência para derivar a direção contábil");
+                if (!reference) throw new InvalidTransactionStateError("Rollback exige a transação de referência para derivar a direção contábil");
 
                 const refDir = reference.ledgerDirectionFor();
                 return refDir === LedgerDirection.Debit ? LedgerDirection.Credit : LedgerDirection.Debit;
             }
 
             case WagerTransactionKind.Loss:
-                throw new Error("Transações do tipo LOSS não geram movimentação contábil no ledger");
+                throw new InvalidTransactionStateError("Transações do tipo LOSS não geram movimentação contábil no ledger");
         }
     }
 
     private assertNotTerminal(): void
     {
-        if (this.isTerminal()) throw new Error(`Transição ilegal: transação ${this.id} já se encontra no estado terminal ${this._status}`);
+        if (this.isTerminal()) throw new InvalidTransactionStateError(`Transição ilegal: transação ${this.id} já se encontra no estado terminal ${this._status}`);
     }
 }

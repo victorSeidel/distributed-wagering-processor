@@ -2,6 +2,7 @@ import { Money } from "../../domain/common/money";
 import { WagerTransaction } from "../../domain/wager/wager-transaction";
 import { Wallet } from "../../domain/wallet/wallet";
 import type { WalletLedgerEntry } from "../../domain/wallet/wallet-ledger-entry";
+
 import { WagerTransactionEntity } from "./entities/wager-transaction.entity";
 import { WalletLedgerEntryEntity } from "./entities/wallet-ledger-entry.entity";
 import { WalletEntity } from "./entities/wallet.entity";
@@ -94,5 +95,13 @@ export class DatabaseMapper
         entity.processedAt = domain.processedAt;
         entity.createdAt = domain.createdAt;
         return entity;
+    }
+
+    public static applyWagerState(entity: WagerTransactionEntity, domain: WagerTransaction): void
+    {
+        entity.status = domain.status;
+        entity.failureCode = domain.failureCode;
+        entity.referenceTransactionId = domain.referenceTransactionId;
+        entity.processedAt = domain.processedAt;
     }
 }

@@ -8,6 +8,7 @@ import { v7 as uuidv7 } from "uuid";
 import { WagerFailureCode, WagerTransactionKind, WagerTransactionStatus } from "../../src/model/entity/wager.entity";
 
 import { OpenWalletUseCase } from "../../src/application/usecase/open-wallet.usecase";
+import { WagerSettlementService } from "../../src/application/service/wager-settlement.service";
 import { ProcessWagerUseCase } from "../../src/application/usecase/process-wager.usecase";
 import { ReconcileWalletUseCase } from "../../src/application/usecase/reconcile-wallet.usecase";
 
@@ -22,7 +23,7 @@ describe("Testes Obrigatórios de Concorrência e Integridade Contábil", () =>
     {
         orm = await MikroORM.init(mikroOrmConfig);
         openWalletUseCase = new OpenWalletUseCase(orm.em);
-        processWagerUseCase = new ProcessWagerUseCase(orm.em);
+        processWagerUseCase = new ProcessWagerUseCase(orm.em, new WagerSettlementService());
         reconcileWalletUseCase = new ReconcileWalletUseCase(orm.em);
     });
 

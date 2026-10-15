@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
+import { WalletNotFoundError } from "../../domain/common/errors";
+import { assertUuid } from "../validation/wager-input.validation";
 import { EntityManager } from "@mikro-orm/postgresql";
 import Decimal from "decimal.js";
 import type { WagerReconciliationResponseDto } from "../../model/dto/wager.dto";
@@ -14,10 +16,11 @@ export class ReconcileWalletUseCase
 
     public async execute(walletId: string): Promise<WagerReconciliationResponseDto>
     {
+        assertUuid(walletId, "walletId");
         const forkEm = this.em.fork();
 
         const wallet = await forkEm.findOne(WalletEntity, { id: walletId });
-        if (!wallet) throw new NotFoundException(`Wallet com id '${walletId}' não encontrada`);
+        if (!wallet) throw new WalletNotFoundError(walletId);
 
         const entries = await forkEm.find(WalletLedgerEntryEntity, { walletId }, { orderBy: { createdAt: "ASC" } });
 

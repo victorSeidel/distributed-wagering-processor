@@ -1,7 +1,9 @@
-import { Controller, Post, Get, Param, Body, Query, UseGuards, NotFoundException } from "@nestjs/common";
+import { Controller, Post, Get, Param, Body, Query, UseGuards, HttpCode } from "@nestjs/common";
 import { EntityManager } from "@mikro-orm/postgresql";
 import { ProviderIdentityGuard } from "../guard/provider-identity.guard";
 
+import { WalletNotFoundError, InvalidInputError } from "../../domain/common/errors";
+import { UuidParamPipe } from "../validation/uuid-param.pipe";
 import type { CreateWalletDto } from "../../model/dto/wallet.dto";
 import { WalletEntity } from "../../infra/database/entities/wallet.entity";
 
@@ -27,11 +29,11 @@ export class WalletsController
     }
 
     @Get(":walletId")
-    async getWallet(@Param("walletId") walletId: string)
+    async getWallet(@Param("walletId", UuidParamPipe) walletId: string)
     {
         const forkEm = this.em.fork();
         const wallet = await forkEm.findOne(WalletEntity, { id: walletId });
-        if (!wallet) throw new NotFoundException(`Wallet '${walletId}' não encontrada`);
+        if (!wallet) throw new WalletNotFoundError(walletId);
 
         return {
             id: wallet.id,
@@ -47,14 +49,16 @@ export class WalletsController
     }
 
     @Get(":walletId/ledger")
-    async getLedger( @Param("walletId") walletId: string, @Query("cursor") cursor?: string, @Query("limit") limit?: string)
+    async getLedger( @Param("walletId", UuidParamPipe) walletId: string, @Query("cursor") cursor?: string, @Query("limit") limit?: string)
     {
-        const parsedLimit = limit ? Math.min(Math.max(Number(limit), 1), 100) : 50;
+        const parsedLimit = limit === undefined ? 50 : Number(limit);
+        if (limit !== undefined && (limit.trim() === "" || !Number.isInteger(parsedLimit))) throw new InvalidInputError("Parâmetro 'limit' deve ser um inteiro");
         return await this.getWalletLedgerUseCase.execute(walletId, cursor, parsedLimit);
     }
 
     @Post(":walletId/reconciliation")
-    async reconcile(@Param("walletId") walletId: string)
+    @HttpCode(200)
+    async reconcile(@Param("walletId", UuidParamPipe) walletId: string)
     {
         return await this.reconcileWalletUseCase.execute(walletId);
     }

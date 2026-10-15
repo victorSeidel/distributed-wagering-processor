@@ -29,6 +29,9 @@ export const WagerTransactionSchema = defineEntity({
         status: p.enum(() => WagerTransactionStatus).default(WagerTransactionStatus.Pending),
         failureCode: p.enum(() => WagerFailureCode).nullable(),
 
+        referenceAttempts: p.integer().default(0),
+        referenceNextAttemptAt: p.datetime().nullable(),
+
         processedAt: p.datetime().nullable(),
         createdAt: p.datetime().onCreate(() => new Date()),
     },
@@ -39,6 +42,7 @@ export const WagerTransactionSchema = defineEntity({
         { name: "idx_wagers_reference", properties: ["providerId", "referenceExternalTransactionId"] },
         { name: "idx_wagers_wallet", properties: ["walletId"] },
         { name: "idx_wagers_status", properties: ["status"] },
+        { name: "idx_wagers_pending_due", properties: ["status", "referenceNextAttemptAt"] },
         {
             name: "uq_wagers_single_reversal_per_reference",
             properties: ["referenceTransactionId", "kind"],
@@ -50,6 +54,7 @@ export const WagerTransactionSchema = defineEntity({
     ],
     checks: [
         { name: "chk_wager_amount_positive", expression: "amount > 0" },
+        { name: "chk_wager_reference_attempts_non_negative", expression: "reference_attempts >= 0" },
     ],
 });
 

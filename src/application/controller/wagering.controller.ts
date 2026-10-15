@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body, Headers, UseGuards, Res, HttpStatus, NotFoundException, BadRequestException, } from "@nestjs/common";
+import { Controller, Post, Get, Param, Body, Headers, UseGuards, Res, HttpStatus } from "@nestjs/common";
 import type { Response } from "express";
 
 import { EntityManager } from "@mikro-orm/postgresql";
@@ -8,6 +8,8 @@ import type { SubmitWagerTransactionDto } from "../../model/dto/wager.dto";
 import { WagerTransactionStatus } from "../../model/entity/wager.entity";
 import { WagerTransactionEntity } from "../../infra/database/entities/wager-transaction.entity";
 
+import { TransactionNotFoundError, InvalidInputError } from "../../domain/common/errors";
+import { UuidParamPipe } from "../validation/uuid-param.pipe";
 import { ProcessWagerUseCase } from "../usecase/process-wager.usecase";
 
 @Controller()
@@ -20,12 +22,11 @@ export class WageringController
     ) {}
 
     @Post("wagering/transactions")
-    async submitTransaction(@Body() dto: SubmitWagerTransactionDto, @Headers("idempotency-key") idempotencyHeader: string | undefined, @Res() res: Response)
+    async submitTransaction(@Body() dto: SubmitWagerTransactionDto, @Headers("idempotency-key") idempotencyKey: string | undefined, @Headers("x-correlation-id") correlationId: string | undefined, @Res() res: Response)
     {
-        const idempotencyKey = idempotencyHeader;
-        if (!idempotencyKey) throw new BadRequestException(`Header 'idempotency-key' é obrigatória`);
+        if (!idempotencyKey?.trim()) throw new InvalidInputError("Header 'Idempotency-Key' é obrigatório");
 
-        const result = await this.processWagerUseCase.execute({ ...dto, idempotencyKey });
+        const result = await this.processWagerUseCase.execute({ ...dto, idempotencyKey, correlationId });
 
         if (result.status === WagerTransactionStatus.Rejected) return res.status(HttpStatus.UNPROCESSABLE_ENTITY).json(result);
 
@@ -35,11 +36,11 @@ export class WageringController
     }
 
     @Get("wagering/transactions/:transactionId")
-    async getTransaction(@Param("transactionId") transactionId: string)
+    async getTransaction(@Param("transactionId", UuidParamPipe) transactionId: string)
     {
         const forkEm = this.em.fork();
         const tx = await forkEm.findOne(WagerTransactionEntity, { id: transactionId });
-        if (!tx) throw new NotFoundException(`Transação '${transactionId}' não encontrada`);
+        if (!tx) throw new TransactionNotFoundError(`Transação '${transactionId}' não encontrada`);
         return tx;
     }
 
@@ -48,7 +49,7 @@ export class WageringController
     {
         const forkEm = this.em.fork();
         const tx = await forkEm.findOne(WagerTransactionEntity, { providerId, externalTransactionId });
-        if (!tx) throw new NotFoundException(`Transação externa '${externalTransactionId}' do provedor '${providerId}' não encontrada`);
+        if (!tx) throw new TransactionNotFoundError(`Transação externa '${externalTransactionId}' do provedor '${providerId}' não encontrada`);
         return tx;
     }
 }

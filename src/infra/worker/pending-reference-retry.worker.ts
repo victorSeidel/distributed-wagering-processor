@@ -5,14 +5,12 @@ import { v7 as uuidv7 } from "uuid";
 
 import { WagerTransactionEntity } from "../database/entities/wager-transaction.entity";
 import { WalletEntity } from "../database/entities/wallet.entity";
-import { OutboxMessageEntity } from "../database/entities/messaging.entity";
 import { DatabaseMapper } from "../database/database.mapper";
 
-import { LedgerDirection } from "../../model/type/wallet.type";
 import { WagerFailureCode, WagerTransactionStatus } from "../../model/entity/wager.entity";
 
-import { WagerTransactionProcessed, WagerTransactionRejected, WalletBalanceChanged } from "../../domain/common/integration-event";
-import { WalletLedgerEntry } from "../../domain/wallet/wallet-ledger-entry";
+import { WagerSettlementService } from "../../application/service/wager-settlement.service";
+
 
 @Injectable()
 export class PendingReferenceRetryWorker implements OnModuleInit, OnModuleDestroy
@@ -21,21 +19,31 @@ export class PendingReferenceRetryWorker implements OnModuleInit, OnModuleDestro
     private isRunning = false;
     private intervalRef: NodeJS.Timeout | null = null;
     private isProcessing = false;
-    private readonly ttlMs = 5 * 60 * 1000;
 
-    constructor(private readonly em: EntityManager) {}
+    private readonly pollIntervalMs = 3000;
+    private readonly batchSize = 20;
+    private readonly ttlMs = 5 * 60 * 1000;
+    private readonly maxAttempts = 10;
+    private readonly backoffBaseMs = 2000;
+    private readonly backoffMaxMs = 60_000;
+
+    constructor(
+        private readonly em: EntityManager,
+        private readonly settlement: WagerSettlementService,
+    ) {}
 
     onModuleInit()
     {
         this.isRunning = true;
-        this.intervalRef = setInterval(() => this.processPendingReferences(), 3000);
+        this.intervalRef = setInterval(() => void this.processPendingReferences(), this.pollIntervalMs);
         this.logger.log("PendingReferenceRetryWorker inicializado.");
     }
 
-    onModuleDestroy()
+    async onModuleDestroy()
     {
         this.isRunning = false;
         if (this.intervalRef) clearInterval(this.intervalRef);
+        while (this.isProcessing) await new Promise((resolve) => setTimeout(resolve, 50));
         this.logger.log("PendingReferenceRetryWorker finalizado.");
     }
 
@@ -44,159 +52,12 @@ export class PendingReferenceRetryWorker implements OnModuleInit, OnModuleDestro
         if (!this.isRunning || this.isProcessing) return;
         this.isProcessing = true;
 
-        const forkEm = this.em.fork();
-
         try
         {
-            const pendingEntities = await forkEm.find(
-                WagerTransactionEntity,
-                { status: WagerTransactionStatus.PendingReference },
-                { limit: 20, orderBy: { createdAt: "ASC" } }
-            );
-
-            for (const txEntity of pendingEntities)
+            for (let i = 0; i < this.batchSize && this.isRunning; i++)
             {
-                await forkEm.transactional(async (em) =>
-                {
-                    const now = new Date();
-                    const ageMs = now.getTime() - txEntity.createdAt.getTime();
-
-                    if (ageMs > this.ttlMs)
-                    {
-                        txEntity.status = WagerTransactionStatus.Rejected;
-                        txEntity.failureCode = WagerFailureCode.ReferenceNotFound;
-                        txEntity.processedAt = now;
-                        txEntity.balanceAfter = null;
-
-                        const rejectedEvent = new WagerTransactionRejected({
-                            aggregateId: txEntity.id,
-                            correlationId: uuidv7(),
-                            data: {
-                                transactionId: txEntity.id,
-                                providerId: txEntity.providerId,
-                                externalTransactionId: txEntity.externalTransactionId,
-                                walletId: txEntity.walletId,
-                                playerId: txEntity.playerId,
-                                kind: txEntity.kind,
-                                failureCode: WagerFailureCode.ReferenceNotFound,
-                            },
-                        });
-
-                        this.enqueueOutbox(em, rejectedEvent);
-                        return;
-                    }
-
-                    const refEntity = await em.findOne(WagerTransactionEntity, {
-                        providerId: txEntity.providerId,
-                        externalTransactionId: txEntity.referenceExternalTransactionId,
-                        status: WagerTransactionStatus.Processed,
-                    });
-
-                    if (!refEntity) return;
-
-                    const walletEntity = await em.findOne(
-                        WalletEntity,
-                        { id: txEntity.walletId },
-                        { lockMode: LockMode.PESSIMISTIC_WRITE }
-                    );
-
-                    if (!walletEntity) return;
-
-                    const wallet = DatabaseMapper.toWalletDomain(walletEntity);
-                    const tx = DatabaseMapper.toWagerDomain(txEntity);
-                    const refTx = DatabaseMapper.toWagerDomain(refEntity);
-
-                    if (!refTx.money.equals(tx.money) || refTx.roundId !== tx.roundId)
-                    {
-                        tx.reject(WagerFailureCode.AmountMismatch);
-                        txEntity.status = tx.status;
-                        txEntity.failureCode = tx.failureCode;
-                        txEntity.processedAt = tx.processedAt;
-                        txEntity.balanceAfter = wallet.balance.toString();
-                        return;
-                    }
-
-                    const balanceBefore = wallet.balance;
-                    const direction = tx.ledgerDirectionFor(refTx);
-
-                    if (direction === LedgerDirection.Debit)
-                    {
-                        if (wallet.balance.isLessThan(tx.money))
-                        {
-                            tx.reject(WagerFailureCode.ReversalWouldProduceNegativeBalance);
-                            txEntity.status = tx.status;
-                            txEntity.failureCode = tx.failureCode;
-                            txEntity.processedAt = tx.processedAt;
-                        txEntity.balanceAfter = wallet.balance.toString();
-                            return;
-                        }
-
-                        wallet.debit(tx.money);
-                    }
-                    else
-                    {
-                        wallet.credit(tx.money);
-                    }
-
-                    tx.markProcessed(refTx.id, now);
-
-                    txEntity.status = tx.status;
-                    txEntity.referenceTransactionId = refTx.id;
-                    txEntity.processedAt = now;
-                    txEntity.balanceAfter = wallet.balance.toString();
-
-                    walletEntity.balance = wallet.balance.toString();
-                    walletEntity.version = wallet.version;
-                    walletEntity.updatedAt = wallet.updatedAt;
-
-                    const ledgerEntry = WalletLedgerEntry.create({
-                        id: uuidv7(),
-                        walletId: wallet.id,
-                        transactionId: tx.id,
-                        direction,
-                        money: tx.money,
-                        balanceBefore,
-                        balanceAfter: wallet.balance,
-                    });
-
-                    em.persist(DatabaseMapper.toLedgerEntity(ledgerEntry));
-
-                    const correlationId = uuidv7();
-                    const balanceEvent = new WalletBalanceChanged({
-                        aggregateId: wallet.id,
-                        correlationId,
-                        data: {
-                            walletId: wallet.id,
-                            transactionId: tx.id,
-                            direction,
-                            money: tx.money.toJSON(),
-                            balanceBefore: balanceBefore.toJSON(),
-                            balanceAfter: wallet.balance.toJSON(),
-                            walletVersion: wallet.version,
-                        },
-                    });
-
-                    this.enqueueOutbox(em, balanceEvent);
-
-                    const processedEvent = new WagerTransactionProcessed({
-                        aggregateId: tx.id,
-                        correlationId,
-                        data: {
-                            transactionId: tx.id,
-                            providerId: tx.providerId,
-                            externalTransactionId: tx.externalTransactionId,
-                            walletId: wallet.id,
-                            playerId: wallet.playerId,
-                            roundId: tx.roundId,
-                            gameId: tx.gameId,
-                            kind: tx.kind,
-                            money: tx.money.toJSON(),
-                            balanceAfter: wallet.balance.toJSON(),
-                        },
-                    });
-
-                    this.enqueueOutbox(em, processedEvent);
-                });
+                const handled = await this.processNext();
+                if (!handled) break;
             }
         }
         catch (err: unknown)
@@ -210,16 +71,58 @@ export class PendingReferenceRetryWorker implements OnModuleInit, OnModuleDestro
         }
     }
 
-    private enqueueOutbox(em: EntityManager, event: { aggregateId: string; eventType: string; toJSON: () => Record<string, unknown> }): void
+    private async processNext(): Promise<boolean>
     {
-        const outboxEntity = new OutboxMessageEntity();
-        outboxEntity.id = uuidv7();
-        outboxEntity.aggregateId = event.aggregateId;
-        outboxEntity.eventType = event.eventType;
-        outboxEntity.payload = event.toJSON();
-        outboxEntity.occurredAt = new Date();
-        outboxEntity.nextAttemptAt = new Date();
-        outboxEntity.attempts = 0;
-        em.persist(outboxEntity);
+        return await this.em.fork().transactional(async (em) =>
+        {
+            const now = new Date();
+
+            const rows = await em.execute<{ id: string }[]>(
+                `SELECT id FROM wager_transactions
+                WHERE status = ? AND (reference_next_attempt_at IS NULL OR reference_next_attempt_at <= ?)
+                ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
+                [WagerTransactionStatus.PendingReference, now],
+            );
+
+            const id = rows[0]?.id;
+            if (!id) return false;
+
+            const txEntity = await em.findOneOrFail(WagerTransactionEntity, { id });
+            if (txEntity.status !== WagerTransactionStatus.PendingReference) return true;
+
+            const walletEntity = await em.findOne(WalletEntity, { id: txEntity.walletId }, { lockMode: LockMode.PESSIMISTIC_WRITE });
+            if (!walletEntity) throw new Error(`Wallet ${txEntity.walletId} da transação ${txEntity.id} não encontrada`);
+
+            const transaction = DatabaseMapper.toWagerDomain(txEntity);
+            const params = { walletEntity, transaction, correlationId: uuidv7(), existingEntity: txEntity };
+
+            const outcome = await this.settlement.settle(em, params);
+            if (outcome)
+            {
+                this.logger.log(`transactionId=${txEntity.id} walletId=${txEntity.walletId} providerId=${txEntity.providerId} reprocessada status=${outcome.status}${outcome.failureCode ? ` failureCode=${outcome.failureCode}` : ""}`);
+                return true;
+            }
+
+            const attempts = txEntity.referenceAttempts + 1;
+            const expired = now.getTime() - txEntity.createdAt.getTime() > this.ttlMs || attempts >= this.maxAttempts;
+
+            if (expired)
+            {
+                this.settlement.reject(em, params, DatabaseMapper.toWalletDomain(walletEntity), WagerFailureCode.ReferenceNotFound);
+                txEntity.referenceAttempts = attempts;
+                this.logger.warn(`transactionId=${txEntity.id} walletId=${txEntity.walletId} providerId=${txEntity.providerId} referência não encontrada após ${attempts} tentativas, rejeitada`);
+                return true;
+            }
+
+            txEntity.referenceAttempts = attempts;
+            txEntity.referenceNextAttemptAt = new Date(now.getTime() + this.computeBackoffMs(attempts));
+            return true;
+        });
+    }
+
+    private computeBackoffMs(attempts: number): number
+    {
+        const exp = Math.min(this.backoffBaseMs * 2 ** (attempts - 1), this.backoffMaxMs);
+        return Math.floor(exp / 2 + Math.random() * (exp / 2));
     }
 }

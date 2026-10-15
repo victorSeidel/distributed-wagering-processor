@@ -25,6 +25,7 @@ export class SqsConsumerService implements OnModuleInit, OnModuleDestroy
     private isRunning = false;
     private isPolling = false;
 
+    private readonly expectedType = "WagerTransactionRequested";
     private readonly maxReceiveCount = 5;
     private readonly backoffBaseSeconds = 5;
     private readonly backoffMaxSeconds = 300;
@@ -82,7 +83,7 @@ export class SqsConsumerService implements OnModuleInit, OnModuleDestroy
             MaxNumberOfMessages: 10,
             WaitTimeSeconds: 5,
             VisibilityTimeout: 30,
-            MessageSystemAttributeNames: ["ApproximateReceiveCount"],
+            MessageSystemAttributeNames: ["ApproximateReceiveCount", "MessageGroupId"],
         });
 
         const response = await client.send(command);
@@ -129,6 +130,8 @@ export class SqsConsumerService implements OnModuleInit, OnModuleDestroy
         {
             throw new InvalidMessageError(`JSON inválido (${e instanceof Error ? e.name : "unknown"}, ${message.Body.length} bytes)`);
         }
+
+        if (envelope?.type !== this.expectedType) throw new InvalidMessageError(`Tipo de mensagem não suportado nesta fila: ${String(envelope?.type)}`);
 
         if (typeof envelope?.messageId !== "string" || !envelope.messageId || typeof envelope.data !== "object" || envelope.data === null)
             throw new InvalidMessageError("Envelope sem messageId/data");

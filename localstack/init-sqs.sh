@@ -10,8 +10,6 @@ DLQ_URL=$(awslocal sqs create-queue \
     --query 'QueueUrl' \
     --output text)
 
-echo "DLQ: $DLQ_URL"
-
 # 2. Obter ARN da DLQ
 DLQ_ARN=$(awslocal sqs get-queue-attributes \
     --queue-url "$DLQ_URL" \
@@ -19,12 +17,15 @@ DLQ_ARN=$(awslocal sqs get-queue-attributes \
     --query 'Attributes.QueueArn' \
     --output text)
 
-echo "DLQ ARN: $DLQ_ARN"
-
 # 3. Criar política de redirecionamento
 REDRIVE_POLICY=$(printf '{\\"deadLetterTargetArn\\":\\"%s\\",\\"maxReceiveCount\\":\\"5\\"}' "$DLQ_ARN")
 
-# 4. Criar fila principal
+# 4. Criar fila de eventos de integração
+awslocal sqs create-queue \
+    --queue-name wager-events.fifo \
+    --attributes '{"FifoQueue":"true","ContentBasedDeduplication":"false"}'
+
+# 5. Criar fila principal
 awslocal sqs create-queue \
     --queue-name wager-transactions.fifo \
     --attributes "{\"FifoQueue\":\"true\",\"ContentBasedDeduplication\":\"false\",\"RedrivePolicy\":\"$REDRIVE_POLICY\"}"

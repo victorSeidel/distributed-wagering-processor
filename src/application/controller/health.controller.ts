@@ -38,10 +38,10 @@ export class HealthController
         try
         {
             const client = this.sqsService.getClient();
-            const queueUrl = this.sqsService.getQueueUrl();
-            if (client && queueUrl)
+            const queueUrls = [this.sqsService.getQueueUrl(), this.sqsService.getEventsQueueUrl()];
+            if (client && queueUrls.every(Boolean))
             {
-                await client.send(new GetQueueAttributesCommand({ QueueUrl: queueUrl, AttributeNames: ["QueueArn"] }));
+                await Promise.all(queueUrls.map((QueueUrl) => client.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ["QueueArn"] }))));
                 checks.sqs = true;
             }
         }
@@ -52,11 +52,6 @@ export class HealthController
 
         const isHealthy = checks.postgres && checks.sqs;
         const status = isHealthy ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE;
-
-        return res.status(status).json({
-            status: isHealthy ? "READY" : "NOT_READY",
-            checks,
-            timestamp: new Date().toISOString(),
-        });
+        return res.status(status).json({ status: isHealthy ? "READY" : "NOT_READY", checks, timestamp: new Date().toISOString() });
     }
 }

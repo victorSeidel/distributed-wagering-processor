@@ -1,5 +1,7 @@
-import type { OpenWalletDto, WalletState } from "../../model/dto/wallet.dto";
 import type { Money } from "../common/money";
+import { CurrencyMismatchError, InsufficientFundsError } from "../common/errors";
+
+import type { OpenWalletDto, WalletState } from "../../model/dto/wallet.dto";
 
 export class Wallet
 {
@@ -59,7 +61,7 @@ export class Wallet
     {
         this.assertSameCurrency(amount);
 
-        if (this._balance.isLessThan(amount)) throw new Error("Saldo insuficiente para efetuar o débito.");
+        if (this._balance.isLessThan(amount)) throw new InsufficientFundsError("Saldo insuficiente para efetuar o débito.");
 
         this._balance = this._balance.subtract(amount);
         this._version += 1;
@@ -77,6 +79,6 @@ export class Wallet
 
     private assertSameCurrency(money: Money): void
     {
-        if (this.currency !== money.currency) throw new Error(`Moeda da operação (${money.currency}) incompatível com a carteira (${this.currency}).`);
+        if (this.currency !== money.currency) throw new CurrencyMismatchError(money.currency, this.currency);
     }
 }

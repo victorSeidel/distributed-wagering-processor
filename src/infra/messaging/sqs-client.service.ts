@@ -8,9 +8,11 @@ export class SqsService implements OnModuleInit
     private client!: SQSClient;
     private queueUrl!: string;
     private dlqUrl!: string;
+    private eventsQueueUrl!: string;
 
     private readonly queueName = "wager-transactions.fifo";
     private readonly dlqName = "wager-transactions-dlq.fifo";
+    private readonly eventsQueueName = "wager-events.fifo";
 
     async onModuleInit()
     {
@@ -36,6 +38,11 @@ export class SqsService implements OnModuleInit
         return this.queueUrl;
     }
 
+    public getEventsQueueUrl(): string
+    {
+        return this.eventsQueueUrl;
+    }
+
     public getDlqUrl(): string
     {
         return this.dlqUrl;
@@ -47,13 +54,15 @@ export class SqsService implements OnModuleInit
         {
             try
             {
-                const [queue, dlq] = await Promise.all([
+                const [queue, dlq, events] = await Promise.all([
                     this.client.send(new GetQueueUrlCommand({ QueueName: this.queueName })),
                     this.client.send(new GetQueueUrlCommand({ QueueName: this.dlqName })),
+                    this.client.send(new GetQueueUrlCommand({ QueueName: this.eventsQueueName })),
                 ]);
 
                 this.queueUrl = queue.QueueUrl!;
                 this.dlqUrl = dlq.QueueUrl!;
+                this.eventsQueueUrl = events.QueueUrl!;
                 return;
             }
             catch (err)
@@ -73,7 +82,7 @@ export class SqsService implements OnModuleInit
     public async publishToFifo(params: { queueUrl?: string; messageBody: string; messageGroupId: string; messageDeduplicationId: string; }): Promise<void>
     {
         const command = new SendMessageCommand({
-            QueueUrl: params.queueUrl || this.queueUrl,
+            QueueUrl: params.queueUrl || this.eventsQueueUrl,
             MessageBody: params.messageBody,
             MessageGroupId: params.messageGroupId,
             MessageDeduplicationId: params.messageDeduplicationId,
@@ -87,6 +96,8 @@ export class SqsService implements OnModuleInit
         await this.getClient().send(new SendMessageCommand({
             QueueUrl: this.getDlqUrl(),
             MessageBody: message.Body || "<empty>",
+            MessageGroupId: message.Attributes?.MessageGroupId ?? "dlq",
+            MessageDeduplicationId: message.MessageId ?? crypto.randomUUID(),
             MessageAttributes: {
                 ErrorCode: { DataType: "String", StringValue: errorCode },
                 OriginalSqsMessageId: { DataType: "String", StringValue: message.MessageId ?? "unknown" },

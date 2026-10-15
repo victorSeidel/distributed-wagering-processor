@@ -8,15 +8,17 @@ import { WalletsController } from "./application/controller/wallet.controller";
 import { WageringController } from "./application/controller/wagering.controller";
 import { HealthController } from "./application/controller/health.controller";
 
+import { StructuredLogger } from "./application/service/structured-logger.service";
+import { WagerSettlementService } from "./application/service/wager-settlement.service";
+
 import { OpenWalletUseCase } from "./application/usecase/open-wallet.usecase";
 import { ProcessWagerUseCase } from "./application/usecase/process-wager.usecase";
 import { ReconcileWalletUseCase } from "./application/usecase/reconcile-wallet.usecase";
 import { GetWalletLedgerUseCase } from "./application/usecase/get-wallet-ledger.usecase";
 
-import { BusinessErrorFilter } from "./infra/filter/business-error-filter";
+import { GlobalExceptionFilter } from "./infra/filter/global-exception.filter";
 import { MessagingModule } from "./infra/messaging/messaging.module";
 import { PendingReferenceRetryWorker } from "./infra/worker/pending-reference-retry.worker";
-import { StructuredLogger } from "./infra/structured-logger.service";
 
 @Module({
     imports: [
@@ -31,13 +33,14 @@ import { StructuredLogger } from "./infra/structured-logger.service";
     ],
 
     providers: [
+        WagerSettlementService,
         OpenWalletUseCase,
         ProcessWagerUseCase,
         ReconcileWalletUseCase,
         GetWalletLedgerUseCase,
         PendingReferenceRetryWorker,
         StructuredLogger,
-        { provide: APP_FILTER, useClass: BusinessErrorFilter },
+        { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     ],
 })
 

@@ -1,6 +1,8 @@
+import type { Money } from "../common/money";
+import { LedgerInvariantError } from "../common/errors";
+
 import { type CreateLedgerEntryDto, type LedgerEntryState } from "../../model/dto/wallet.dto";
 import { LedgerDirection } from "../../model/type/wallet.type";
-import type { Money } from "../common/money";
 
 export class WalletLedgerEntry
 {
@@ -27,7 +29,7 @@ export class WalletLedgerEntry
             dto.balanceAfter, new Date()
         );
 
-        if (!entry.isBalanced()) throw new Error(`Invariante violada: before (${dto.balanceBefore}) ± money (${dto.money}) !== afeter (${dto.balanceAfter})`);
+        if (!entry.isBalanced()) throw new LedgerInvariantError(`Invariante violada: before (${dto.balanceBefore}) ± money (${dto.money}) !== after (${dto.balanceAfter})`);
 
         return entry;
     }

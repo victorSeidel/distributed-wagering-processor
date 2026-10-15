@@ -1,23 +1,23 @@
 import { Injectable } from "@nestjs/common";
 import { EntityManager, LockMode } from "@mikro-orm/postgresql";
+import { UniqueConstraintViolationException } from "@mikro-orm/core";
 import { v7 as uuidv7 } from "uuid";
 
 import { Money } from "../../domain/common/money";
-import { WalletBalanceChanged, WagerTransactionProcessed, WagerTransactionRejected, WagerTransactionPendingReference, } from "../../domain/common/integration-event";
 import { hashPayload } from "../../domain/common/canonical-json";
-import { IdempotencyConflictError, WalletNotFoundError, CurrencyMismatchError, InboxPayloadMismatchError } from "../../domain/common/errors";
+import { IdempotencyConflictError, DuplicateExternalTransactionError, WalletNotFoundError, CurrencyMismatchError, InboxPayloadMismatchError } from "../../domain/common/errors";
 import { WagerTransaction } from "../../domain/wager/wager-transaction";
-import { WalletLedgerEntry } from "../../domain/wallet/wallet-ledger-entry";
-import type { Wallet } from "../../domain/wallet/wallet";
 
 import type { Money as MoneyType } from "../../model/type/money.type";
-import { WagerFailureCode, WagerTransactionKind, WagerTransactionStatus } from "../../model/entity/wager.entity";
-import { LedgerDirection } from "../../model/type/wallet.type";
+import type { WagerFailureCode, WagerTransactionKind, WagerTransactionStatus } from "../../model/entity/wager.entity";
 
 import { WagerTransactionEntity } from "../../infra/database/entities/wager-transaction.entity";
 import { WalletEntity } from "../../infra/database/entities/wallet.entity";
-import { InboxMessageEntity, OutboxMessageEntity } from "../../infra/database/entities/messaging.entity";
+import { InboxMessageEntity } from "../../infra/database/entities/messaging.entity";
 import { DatabaseMapper } from "../../infra/database/database.mapper";
+
+import { WagerSettlementService } from "../service/wager-settlement.service";
+import { validateWagerSubmission } from "../validation/wager-input.validation";
 
 export interface ProcessWagerInput
 {
@@ -53,14 +53,17 @@ export interface InboxContext
 @Injectable()
 export class ProcessWagerUseCase
 {
-    constructor(private readonly em: EntityManager) {}
+    constructor(
+        private readonly em: EntityManager,
+        private readonly settlement: WagerSettlementService,
+    ) {}
 
     public async execute(input: ProcessWagerInput, inbox?: InboxContext): Promise<ProcessWagerOutput>
     {
-        const inputMoney = Money.from(input.money);
+        const inputMoney = validateWagerSubmission(input);
         const correlationId = input.correlationId ?? uuidv7();
 
-        const businessPayload = {
+        const currentPayloadHash = hashPayload({
             providerId: input.providerId,
             externalTransactionId: input.externalTransactionId,
             playerId: input.playerId,
@@ -68,19 +71,27 @@ export class ProcessWagerUseCase
             roundId: input.roundId,
             gameId: input.gameId,
             kind: input.kind,
-            money: input.money,
+            money: inputMoney.toJSON(),
             referenceExternalTransactionId: input.referenceExternalTransactionId ?? null,
-        };
-
-        const currentPayloadHash = hashPayload(businessPayload);
-
-        return await this.em.transactional(async (em) =>
-        {
-            const inboxEntry = inbox ? await this.acquireInbox(em, inbox) : undefined;
-            const output = await this.processInTransaction(em, input, inputMoney, correlationId, currentPayloadHash);
-            if (inboxEntry && !inboxEntry.processedAt) inboxEntry.processedAt = new Date();
-            return output;
         });
+
+        try
+        {
+            return await this.em.transactional(async (em) =>
+            {
+                const inboxEntry = inbox ? await this.acquireInbox(em, inbox) : undefined;
+                const output = await this.processInTransaction(em, input, inputMoney, correlationId, currentPayloadHash);
+                if (inboxEntry && !inboxEntry.processedAt) inboxEntry.processedAt = new Date();
+                return output;
+            });
+        }
+        catch (err)
+        {
+            if (err instanceof UniqueConstraintViolationException && err.message.includes("uq_wagers_provider_external_tx"))
+                throw new DuplicateExternalTransactionError(input.providerId, input.externalTransactionId);
+
+            throw err;
+        }
     }
 
     private async acquireInbox(em: EntityManager, inbox: InboxContext): Promise<InboxMessageEntity>
@@ -116,7 +127,7 @@ export class ProcessWagerUseCase
         const idempotencyKey = input.idempotencyKey;
         await em.execute("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", [idempotencyKey]);
 
-        const existingTxEntity = await em.findOne(WagerTransactionEntity, { idempotencyKey: idempotencyKey });
+        const existingTxEntity = await em.findOne(WagerTransactionEntity, { idempotencyKey });
         if (existingTxEntity)
         {
             const existingTx = DatabaseMapper.toWagerDomain(existingTxEntity);
@@ -137,18 +148,15 @@ export class ProcessWagerUseCase
 
         const walletEntity = await em.findOne(WalletEntity, { id: input.walletId }, { lockMode: LockMode.PESSIMISTIC_WRITE });
         if (!walletEntity) throw new WalletNotFoundError(input.walletId);
+        if (walletEntity.currency !== inputMoney.currency) throw new CurrencyMismatchError(inputMoney.currency, walletEntity.currency);
 
-        const wallet = DatabaseMapper.toWalletDomain(walletEntity);
-        if (wallet.currency !== inputMoney.currency) throw new CurrencyMismatchError(inputMoney.currency, wallet.currency);
-
-        const transactionId = uuidv7();
         const transaction = WagerTransaction.create({
-            id: transactionId,
+            id: uuidv7(),
             providerId: input.providerId,
             externalTransactionId: input.externalTransactionId,
-            idempotencyKey: idempotencyKey,
+            idempotencyKey,
             payloadHash: currentPayloadHash,
-            walletId: wallet.id,
+            walletId: walletEntity.id,
             playerId: input.playerId,
             roundId: input.roundId,
             gameId: input.gameId,
@@ -157,250 +165,23 @@ export class ProcessWagerUseCase
             referenceExternalTransactionId: input.referenceExternalTransactionId,
         });
 
-        if (wallet.playerId !== input.playerId)
-        {
-            transaction.reject(WagerFailureCode.PlayerMismatch);
-            return this.persistRejection(em, wallet, transaction, correlationId);
-        }
-
-        let referenceTx: WagerTransaction | undefined;
-
-        if (transaction.requiresReference())
-        {
-            const refEntity = await em.findOne(WagerTransactionEntity, { providerId: input.providerId, externalTransactionId: input.referenceExternalTransactionId });
-            referenceTx = refEntity ? DatabaseMapper.toWagerDomain(refEntity) : undefined;
-
-            if (!referenceTx || transaction.isReferenceUnresolved(referenceTx)) return this.persistPendingReference(em, wallet, transaction, correlationId);
-
-            const referenceFailure = transaction.evaluateReference(referenceTx);
-            if (referenceFailure)
-            {
-                transaction.reject(referenceFailure);
-                return this.persistRejection(em, wallet, transaction, correlationId);
-            }
-
-            const alreadyReversed = await em.findOne(WagerTransactionEntity, {
-                referenceTransactionId: referenceTx.id,
-                kind: input.kind,
-                status: WagerTransactionStatus.Processed,
-            });
-
-            if (alreadyReversed)
-            {
-                transaction.reject(WagerFailureCode.ReferenceAlreadyReversed);
-                return this.persistRejection(em, wallet, transaction, correlationId);
-            }
-        }
-
-        const balanceBefore = wallet.balance;
-
-        switch (input.kind)
-        {
-            case WagerTransactionKind.Bet:
-            {
-                if (wallet.balance.isLessThan(inputMoney))
-                {
-                    transaction.reject(WagerFailureCode.InsufficientFunds);
-                    return this.persistRejection(em, wallet, transaction, correlationId);
-                }
-
-                wallet.debit(inputMoney);
-                break;
-            }
-
-            case WagerTransactionKind.Win:
-            {
-                wallet.credit(inputMoney);
-                break;
-            }
-
-            case WagerTransactionKind.Loss:
-            {
-                // LOSS não move saldo nem cria ledger
-                break;
-            }
-
-            case WagerTransactionKind.Refund:
-            {
-                wallet.credit(inputMoney);
-                break;
-            }
-
-            case WagerTransactionKind.Rollback:
-            {
-                const dir = transaction.ledgerDirectionFor(referenceTx);
-                if (dir === LedgerDirection.Debit)
-                {
-                    if (wallet.balance.isLessThan(inputMoney))
-                    {
-                        transaction.reject(WagerFailureCode.ReversalWouldProduceNegativeBalance);
-                        return this.persistRejection(em, wallet, transaction, correlationId);
-                    }
-
-                    wallet.debit(inputMoney);
-                }
-                else
-                {
-                    wallet.credit(inputMoney);
-                }
-
-                break;
-            }
-        }
-
-        transaction.markProcessed(referenceTx?.id, new Date());
-        this.persistTransaction(em, transaction, wallet.balance);
-
-        if (transaction.affectsBalance())
-        {
-            const balanceAfter = wallet.balance;
-            const direction = transaction.ledgerDirectionFor(referenceTx);
-
-            const ledgerEntry = WalletLedgerEntry.create({
-                id: uuidv7(),
-                walletId: wallet.id,
-                transactionId: transaction.id,
-                direction,
-                money: inputMoney,
-                balanceBefore,
-                balanceAfter,
-            });
-
-            walletEntity.balance = wallet.balance.toString();
-            walletEntity.version = wallet.version;
-            walletEntity.updatedAt = wallet.updatedAt;
-
-            em.persist(DatabaseMapper.toLedgerEntity(ledgerEntry));
-
-            const balanceEvent = new WalletBalanceChanged({
-                aggregateId: wallet.id,
-                correlationId,
-                data: {
-                    walletId: wallet.id,
-                    transactionId: transaction.id,
-                    direction,
-                    money: inputMoney.toJSON(),
-                    balanceBefore: balanceBefore.toJSON(),
-                    balanceAfter: balanceAfter.toJSON(),
-                    walletVersion: wallet.version,
-                },
-            });
-
-            this.enqueueOutbox(em, balanceEvent);
-        }
-
-        const processedEvent = new WagerTransactionProcessed({
-            aggregateId: transaction.id,
-            correlationId,
-            data: {
-                transactionId: transaction.id,
-                providerId: transaction.providerId,
-                externalTransactionId: transaction.externalTransactionId,
-                walletId: wallet.id,
-                playerId: wallet.playerId,
-                roundId: transaction.roundId,
-                gameId: transaction.gameId,
-                kind: transaction.kind,
-                money: transaction.money.toJSON(),
-                balanceAfter: wallet.balance.toJSON(),
-            },
-        });
-
-        this.enqueueOutbox(em, processedEvent);
+        const params = { walletEntity, transaction, correlationId };
+        const outcome = (await this.settlement.settle(em, params)) ?? this.settlement.registerPendingReference(em, params);
 
         await em.flush();
 
         return {
-            transactionId: transaction.id,
-            status: transaction.status,
-            balance: wallet.balance.toJSON(),
+            transactionId: outcome.transactionId,
+            status: outcome.status,
+            balance: outcome.balance.toJSON(),
             idempotentReplay: false,
+            failureCode: outcome.failureCode,
         };
-    }
-
-    private async persistPendingReference(em: EntityManager, wallet: Wallet, transaction: WagerTransaction, correlationId: string): Promise<ProcessWagerOutput>
-    {
-        transaction.markPendingReference();
-        this.persistTransaction(em, transaction, wallet.balance);
-
-        this.enqueueOutbox(em, new WagerTransactionPendingReference({
-            aggregateId: transaction.id,
-            correlationId,
-            data: {
-                transactionId: transaction.id,
-                providerId: transaction.providerId,
-                externalTransactionId: transaction.externalTransactionId,
-                referenceExternalTransactionId: transaction.referenceExternalTransactionId!,
-                walletId: wallet.id,
-                playerId: wallet.playerId,
-                kind: transaction.kind,
-            },
-        }));
-
-        await em.flush();
-
-        return {
-            transactionId: transaction.id,
-            status: transaction.status,
-            balance: wallet.balance.toJSON(),
-            idempotentReplay: false,
-        };
-    }
-
-    private async persistRejection(em: EntityManager, wallet: Wallet, transaction: WagerTransaction, correlationId: string): Promise<ProcessWagerOutput>
-    {
-        this.persistTransaction(em, transaction, wallet.balance);
-
-        const rejectedEvent = new WagerTransactionRejected({
-            aggregateId: transaction.id,
-            correlationId,
-            data: {
-                transactionId: transaction.id,
-                providerId: transaction.providerId,
-                externalTransactionId: transaction.externalTransactionId,
-                walletId: wallet.id,
-                playerId: wallet.playerId,
-                kind: transaction.kind,
-                failureCode: transaction.failureCode!,
-            },
-        });
-
-        this.enqueueOutbox(em, rejectedEvent);
-
-        await em.flush();
-
-        return {
-            transactionId: transaction.id,
-            status: transaction.status,
-            balance: wallet.balance.toJSON(),
-            idempotentReplay: false,
-            failureCode: transaction.failureCode,
-        };
-    }
-
-    private persistTransaction(em: EntityManager, transaction: WagerTransaction, balanceAfter: Money): void
-    {
-        const entity = DatabaseMapper.toWagerEntity(transaction);
-        entity.balanceAfter = balanceAfter.toString();
-        em.persist(entity);
     }
 
     private async currentBalance(em: EntityManager, walletId: string, fallback: MoneyType): Promise<MoneyType>
     {
         const walletEntity = await em.findOne(WalletEntity, { id: walletId });
         return walletEntity ? Money.from({ amount: walletEntity.balance, currency: walletEntity.currency }).toJSON() : fallback;
-    }
-
-    private enqueueOutbox(em: EntityManager, event: { aggregateId: string; eventType: string; toJSON: () => Record<string, unknown> }): void
-    {
-        const outboxEntity = new OutboxMessageEntity();
-        outboxEntity.id = uuidv7();
-        outboxEntity.aggregateId = event.aggregateId;
-        outboxEntity.eventType = event.eventType;
-        outboxEntity.payload = event.toJSON();
-        outboxEntity.occurredAt = new Date();
-        outboxEntity.nextAttemptAt = new Date();
-        outboxEntity.attempts = 0;
-        em.persist(outboxEntity);
     }
 }
