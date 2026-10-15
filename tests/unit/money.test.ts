@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+
 import { Money } from "../../src/domain/common/money";
 
 describe("Money Value Object", () =>

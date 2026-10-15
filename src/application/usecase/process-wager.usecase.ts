@@ -1,19 +1,22 @@
 import { Injectable, ConflictException, NotFoundException } from "@nestjs/common";
 import { EntityManager, LockMode } from "@mikro-orm/postgresql";
 import { v7 as uuidv7 } from "uuid";
+
 import { Money } from "../../domain/common/money";
-import { WagerTransaction } from "../../domain/wager/wager-transaction";
-import { hashPayload } from "../../domain/common/canonical-json";
 import { WalletBalanceChanged, WagerTransactionProcessed, WagerTransactionRejected, WagerTransactionPendingReference, } from "../../domain/common/integration-event";
-import type { Money as MoneyType } from "../../model/type/money.type";
-import { WagerFailureCode, WagerTransactionKind, WagerTransactionStatus } from "../../model/entity/wager.entity";
-import { WagerTransactionEntity } from "../../infra/database/entities/wager-transaction.entity";
-import { DatabaseMapper } from "../../infra/database/database.mapper";
-import { WalletEntity } from "../../infra/database/entities/wallet.entity";
-import { LedgerDirection } from "../../model/type/wallet.type";
+import { hashPayload } from "../../domain/common/canonical-json";
+import { WagerTransaction } from "../../domain/wager/wager-transaction";
 import { WalletLedgerEntry } from "../../domain/wallet/wallet-ledger-entry";
 import type { Wallet } from "../../domain/wallet/wallet";
+
+import type { Money as MoneyType } from "../../model/type/money.type";
+import { WagerFailureCode, WagerTransactionKind, WagerTransactionStatus } from "../../model/entity/wager.entity";
+import { LedgerDirection } from "../../model/type/wallet.type";
+
+import { WagerTransactionEntity } from "../../infra/database/entities/wager-transaction.entity";
+import { WalletEntity } from "../../infra/database/entities/wallet.entity";
 import { OutboxMessageEntity } from "../../infra/database/entities/messaging.entity";
+import { DatabaseMapper } from "../../infra/database/database.mapper";
 
 export interface ProcessWagerInput
 {
@@ -65,11 +68,14 @@ export class ProcessWagerUseCase
 
         return await this.em.transactional(async (em) =>
         {
-            const existingTxEntity = await em.findOne(WagerTransactionEntity, { idempotencyKey: input.idempotencyKey });
+            const idempotencyKey = input.idempotencyKey;
+            await em.execute("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", [idempotencyKey]);
+
+            const existingTxEntity = await em.findOne(WagerTransactionEntity, { idempotencyKey: idempotencyKey });
             if (existingTxEntity)
             {
                 const existingTx = DatabaseMapper.toWagerDomain(existingTxEntity);
-                if (!existingTx.matchesPayload(currentPayloadHash)) throw new ConflictException(`A chave '${input.idempotencyKey}' já foi utilizada com outro payload`);
+                if (!existingTx.matchesPayload(currentPayloadHash)) throw new ConflictException(`A chave '${idempotencyKey}' já foi utilizada com outro payload`);
 
                 const walletEntity = await em.findOne(WalletEntity, { id: existingTx.walletId });
                 const currentBalance = walletEntity ? Money.from({ amount: walletEntity.balance, currency: walletEntity.currency }).toJSON() : input.money;
@@ -94,7 +100,7 @@ export class ProcessWagerUseCase
                 id: transactionId,
                 providerId: input.providerId,
                 externalTransactionId: input.externalTransactionId,
-                idempotencyKey: input.idempotencyKey,
+                idempotencyKey: idempotencyKey,
                 payloadHash: currentPayloadHash,
                 walletId: wallet.id,
                 playerId: input.playerId,

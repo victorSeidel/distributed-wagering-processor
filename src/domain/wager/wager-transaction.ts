@@ -1,7 +1,8 @@
+import { Money } from "../common/money";
+
 import type { CreateWagerTransactionDto, WagerTransactionState } from "../../model/dto/wager.dto";
 import { WagerTransactionKind, type WagerFailureCode, WagerTransactionStatus } from "../../model/entity/wager.entity";
 import { LedgerDirection } from "../../model/type/wallet.type";
-import { Money } from "../common/money";
 
 export class WagerTransaction
 {

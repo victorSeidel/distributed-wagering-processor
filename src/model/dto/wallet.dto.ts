@@ -1,11 +1,18 @@
 import type { Money } from "../../domain/common/money";
+import type { Money as MoneyType } from "../type/money.type";
 import type { LedgerDirection } from "../type/wallet.type";
+
+export interface CreateWalletDto
+{
+    playerId: string;
+    initialBalance: MoneyType;
+}
 
 export interface OpenWalletDto
 {
     id: string;
     playerId: string;
-    initialBalance: Money;
+    initialBalance: MoneyType;
 }
 
 export interface WalletState
