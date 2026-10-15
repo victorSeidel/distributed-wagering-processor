@@ -21,6 +21,14 @@ export const WalletLedgerEntrySchema = defineEntity({
     },
     indexes: [
         { name: "idx_ledger_wallet_created", properties: ["walletId", "createdAt"] },
+    ],
+    triggers: [
+        {
+            name: "trg_protect_ledger",
+            timing: "before",
+            events: ["update", "delete"],
+            body: `RAISE EXCEPTION 'Lançamentos contábeis no ledger são estritamente imutáveis. Operações de UPDATE ou DELETE são proibidas'; RETURN OLD;`,
+        },
     ]
 });
 

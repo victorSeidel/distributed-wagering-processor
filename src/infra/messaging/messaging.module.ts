@@ -3,7 +3,7 @@ import { Module } from "@nestjs/common";
 import { SqsService } from "./sqs-client.service";
 import { SqsConsumerService } from "./sqs-consumer.service";
 
-import { OutboxRelayWorker } from "./outbox-relay.worker";
+import { OutboxRelayWorker } from "../worker/outbox-relay.worker";
 import { ProcessWagerUseCase } from "../../application/usecase/process-wager.usecase";
 
 @Module({

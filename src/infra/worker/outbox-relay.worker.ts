@@ -1,6 +1,6 @@
 import { Injectable, type OnModuleInit, type OnModuleDestroy, Logger } from "@nestjs/common";
 import { EntityManager } from "@mikro-orm/postgresql";
-import { SqsService } from "./sqs-client.service";
+import { SqsService } from "../messaging/sqs-client.service";
 import { OutboxMessageEntity } from "../database/entities/messaging.entity";
 
 @Injectable()
@@ -43,7 +43,7 @@ export class OutboxRelayWorker implements OnModuleInit, OnModuleDestroy
             await forkEm.transactional(async (em) => 
             {
                 const pendingRows = await em.getConnection().execute<{ id: string }[]>
-                    (`SELECT id FROM outbox_messages WHERE published_at IS NULL AND next_attempt_at <= ? ORDER BY occurred_at ASC LIMIT ?FOR UPDATE SKIP LOCKED`,
+                    (`SELECT id FROM outbox_messages WHERE published_at IS NULL AND next_attempt_at <= ? ORDER BY occurred_at ASC LIMIT ? FOR UPDATE SKIP LOCKED`,
                         [new Date(), this.batchSize],
                 );
 

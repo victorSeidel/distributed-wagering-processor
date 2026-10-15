@@ -1,11 +1,13 @@
 import { Injectable, type OnModuleInit, type OnModuleDestroy, Logger } from "@nestjs/common";
-import { ReceiveMessageCommand, DeleteMessageCommand, ChangeMessageVisibilityCommand, type Message, } from "@aws-sdk/client-sqs";
 import { EntityManager } from "@mikro-orm/postgresql";
+
+import { ReceiveMessageCommand, DeleteMessageCommand, ChangeMessageVisibilityCommand, type Message, } from "@aws-sdk/client-sqs";
+
+import { InboxMessageEntity } from "../database/entities/messaging.entity";
+import { hashPayload } from "../../domain/common/canonical-json";
+
 import { SqsService } from "./sqs-client.service";
 import type { ProcessWagerInput, ProcessWagerUseCase } from "../../application/usecase/process-wager.usecase";
-import { hashPayload } from "../../domain/common/canonical-json";
-import { InboxMessageEntity } from "../database/entities/messaging.entity";
-import { WagerTransactionStatus } from "../../model/entity/wager.entity";
 
 export interface SqsWagerMessageEnvelope
 {

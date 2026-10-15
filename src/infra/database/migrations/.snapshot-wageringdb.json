@@ -532,7 +532,7 @@
           "autoincrement": false,
           "primary": false,
           "nullable": false,
-          "unique": false,
+          "unique": true,
           "length": 255,
           "precision": null,
           "scale": null,
@@ -665,6 +665,29 @@
           "keyName": "idx_wagers_wallet",
           "primary": false,
           "unique": false
+        },
+        {
+          "columnNames": [
+            "provider_id",
+            "external_transaction_id"
+          ],
+          "composite": true,
+          "constraint": true,
+          "keyName": "uq_wagers_provider_external_tx",
+          "primary": false,
+          "unique": true
+        },
+        {
+          "columnNames": [
+            "reference_transaction_id",
+            "kind"
+          ],
+          "composite": true,
+          "constraint": false,
+          "keyName": "uq_wagers_single_reversal_per_reference",
+          "primary": false,
+          "unique": false,
+          "expression": "create unique index \"uq_wagers_single_reversal_per_reference\" on \"wager_transactions\" (\"reference_transaction_id\", \"kind\") where \"status\" = 'PROCESSED' and \"kind\" in ('REFUND', 'ROLLBACK')"
         },
         {
           "columnNames": [
@@ -953,7 +976,18 @@
           "columnName": "direction"
         }
       ],
-      "triggers": [],
+      "triggers": [
+        {
+          "name": "trg_protect_ledger",
+          "timing": "before",
+          "events": [
+            "update",
+            "delete"
+          ],
+          "forEach": "row",
+          "body": "RAISE EXCEPTION 'Lançamentos contábeis no ledger são estritamente imutáveis. Operações de UPDATE ou DELETE são proibidas'; RETURN OLD;"
+        }
+      ],
       "foreignKeys": {},
       "comment": null
     },
