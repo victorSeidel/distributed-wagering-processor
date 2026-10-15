@@ -1,9 +1,9 @@
 import { Injectable, type OnModuleInit, type OnModuleDestroy, Logger } from "@nestjs/common";
 
-import { ReceiveMessageCommand, DeleteMessageCommand, ChangeMessageVisibilityCommand, type Message, } from "@aws-sdk/client-sqs";
+import { ReceiveMessageCommand, DeleteMessageCommand, ChangeMessageVisibilityCommand, type Message } from "@aws-sdk/client-sqs";
 
 import { hashPayload } from "../../domain/common/canonical-json";
-import { InboxPayloadMismatchError } from "../../domain/exception/inbox-payload-mismatch-error";
+import { BusinessError, PermanentError, TransientError, InvalidMessageError } from "../../domain/common/errors";
 
 import { SqsService } from "./sqs-client.service";
 import type { InboxContext, ProcessWagerInput, ProcessWagerUseCase } from "../../application/usecase/process-wager.usecase";
@@ -21,8 +21,13 @@ export class SqsConsumerService implements OnModuleInit, OnModuleDestroy
 {
     private readonly logger = new Logger(SqsConsumerService.name);
     private readonly consumerName = "wager-transactions-consumer";
+
     private isRunning = false;
     private isPolling = false;
+
+    private readonly maxReceiveCount = 5;
+    private readonly backoffBaseSeconds = 5;
+    private readonly backoffMaxSeconds = 300;
 
     constructor(
         private readonly sqsService: SqsService,
@@ -77,6 +82,7 @@ export class SqsConsumerService implements OnModuleInit, OnModuleDestroy
             MaxNumberOfMessages: 10,
             WaitTimeSeconds: 5,
             VisibilityTimeout: 30,
+            MessageSystemAttributeNames: ["ApproximateReceiveCount"],
         });
 
         const response = await client.send(command);
@@ -87,58 +93,107 @@ export class SqsConsumerService implements OnModuleInit, OnModuleDestroy
 
     private async handleMessage(message: Message, queueUrl: string): Promise<void>
     {
-        if (!message.ReceiptHandle || !message.Body) return;
+        if (!message.ReceiptHandle) return;
+
+        const receiptHandle = message.ReceiptHandle;
+        const receiveCount = Number(message.Attributes?.ApproximateReceiveCount ?? 1);
+        const sqsMessageId = message.MessageId ?? "unknown";
+        let messageId = "unknown";
+
+        try
+        {
+            const { envelope, inbox } = this.parseEnvelope(message);
+            messageId = envelope.messageId;
+
+            const result = await this.processWagerUseCase.execute(envelope.data, inbox);
+            if (result.idempotentReplay) this.logger.warn(`Mensagem duplicada: messageId=${messageId} sqsMessageId=${sqsMessageId}. ACK.`);
+
+            await this.ackMessage(queueUrl, receiptHandle);
+        }
+        catch (err: unknown)
+        {
+            await this.handleFailure(err, message, queueUrl, { messageId, sqsMessageId, receiveCount });
+        }
+    }
+
+    private parseEnvelope(message: Message): { envelope: SqsWagerMessageEnvelope; inbox: InboxContext }
+    {
+        if (!message.Body) throw new InvalidMessageError("Corpo da mensagem vazio");
 
         let envelope: SqsWagerMessageEnvelope;
         try
         {
             envelope = JSON.parse(message.Body);
         }
-        catch
+        catch (e)
         {
-            this.logger.error(`Payload inválido recebido no SQS: ${message.Body}. Deletando da fila.`);
-            await this.ackMessage(queueUrl, message.ReceiptHandle);
-            return;
+            throw new InvalidMessageError(`JSON inválido (${e instanceof Error ? e.name : "unknown"}, ${message.Body.length} bytes)`);
         }
 
-        const { messageId, data } = envelope;
+        if (typeof envelope?.messageId !== "string" || !envelope.messageId || typeof envelope.data !== "object" || envelope.data === null)
+            throw new InvalidMessageError("Envelope sem messageId/data");
 
-        if (!messageId || !data)
-        {
-            this.logger.error(`Envelope sem messageId/data: ${message.Body}. Deletando da fila.`);
-            await this.ackMessage(queueUrl, message.ReceiptHandle);
-            return;
-        }
-
-        const inbox: InboxContext = {
-            consumerName: this.consumerName,
-            messageId,
-            payloadHash: hashPayload(data as unknown as Record<string, unknown>),
+        return {
+            envelope,
+            inbox: {
+                consumerName: this.consumerName,
+                messageId: envelope.messageId,
+                payloadHash: hashPayload(envelope.data as unknown as Record<string, unknown>),
+            },
         };
+    }
+
+    private classify(err: unknown): { kind: "business" | "permanent" | "transient"; code: string }
+    {
+        if (err instanceof BusinessError) return { kind: "business", code: err.code };
+        if (err instanceof PermanentError) return { kind: "permanent", code: err.code };
+        return { kind: "transient", code: err instanceof TransientError ? err.code : "UNEXPECTED" };
+    }
+
+    private computeBackoffSeconds(receiveCount: number): number
+    {
+        const exp = Math.min(this.backoffBaseSeconds * 2 ** Math.max(receiveCount - 1, 0), this.backoffMaxSeconds);
+        const half = exp / 2;
+        return Math.floor(half + Math.random() * half);
+    }
+
+    private async handleFailure(
+        err: unknown,
+        message: Message,
+        queueUrl: string,
+        ctx: { messageId: string; sqsMessageId: string; receiveCount: number },
+    ): Promise<void>
+    {
+        const { kind, code } = this.classify(err);
+        const reason = err instanceof Error ? err.message : String(err);
+        const tag = `messageId=${ctx.messageId} sqsMessageId=${ctx.sqsMessageId} receiveCount=${ctx.receiveCount} code=${code}`;
+        const receiptHandle = message.ReceiptHandle!;
 
         try
         {
-            const result = await this.processWagerUseCase.execute(data, inbox);
-            if (result.idempotentReplay) this.logger.warn(`Mensagem duplicada detectada: ${messageId}. Enviando ACK`);
-            await this.ackMessage(queueUrl, message.ReceiptHandle);
+            if (kind === "business")
+            {
+                this.logger.warn(`Erro de negócio, descartando com ACK: ${tag} reason="${reason}"`);
+                await this.ackMessage(queueUrl, receiptHandle);
+                return;
+            }
+
+            if (kind === "permanent")
+            {
+                this.logger.error(`Erro permanente, enviando para DLQ: ${tag} reason="${reason}"`);
+                await this.sqsService.sendToDlq(message, this.consumerName, code);
+                await this.ackMessage(queueUrl, receiptHandle);
+                return;
+            }
+
+            const delay = this.computeBackoffSeconds(ctx.receiveCount);
+            const last = ctx.receiveCount >= this.maxReceiveCount ? " (última tentativa, redrive enviará para a DLQ)" : "";
+            this.logger.error(`Erro transiente${last}: ${tag} retryIn=${delay}s reason="${reason}"`);
+            await this.sqsService.getClient().send(new ChangeMessageVisibilityCommand({ QueueUrl: queueUrl, ReceiptHandle: receiptHandle, VisibilityTimeout: delay }));
         }
-        catch (err: unknown)
+        catch (handlingErr)
         {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-
-            if (err instanceof InboxPayloadMismatchError) this.logger.error(`Mensagem ${messageId} com hash divergente do inbox: ${errorMsg}`);
-            else this.logger.error(`Erro ao processar mensagem ${messageId}: ${errorMsg}`);
-
-            try
-            {
-                await this.sqsService.getClient().send(
-                    new ChangeMessageVisibilityCommand({ QueueUrl: queueUrl, ReceiptHandle: message.ReceiptHandle, VisibilityTimeout: 5 })
-                );
-            }
-            catch (visErr)
-            {
-                this.logger.error(`Falha ao alterar visibilidade da mensagem: ${visErr}`);
-            }
+            this.logger.error(`Falha ao tratar erro (${kind}): ${tag} cause=${handlingErr instanceof Error ? handlingErr.message : String(handlingErr)}`);
         }
     }
 

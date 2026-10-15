@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { APP_FILTER } from "@nestjs/core";
+
 import { MikroOrmModule } from "@mikro-orm/nestjs";
 import mikroOrmConfig from "../mikro-orm.config";
 
@@ -11,6 +13,7 @@ import { ProcessWagerUseCase } from "./application/usecase/process-wager.usecase
 import { ReconcileWalletUseCase } from "./application/usecase/reconcile-wallet.usecase";
 import { GetWalletLedgerUseCase } from "./application/usecase/get-wallet-ledger.usecase";
 
+import { BusinessErrorFilter } from "./infra/filter/business-error-filter";
 import { MessagingModule } from "./infra/messaging/messaging.module";
 import { PendingReferenceRetryWorker } from "./infra/worker/pending-reference-retry.worker";
 import { StructuredLogger } from "./infra/structured-logger.service";
@@ -34,6 +37,7 @@ import { StructuredLogger } from "./infra/structured-logger.service";
         GetWalletLedgerUseCase,
         PendingReferenceRetryWorker,
         StructuredLogger,
+        { provide: APP_FILTER, useClass: BusinessErrorFilter },
     ],
 })
 

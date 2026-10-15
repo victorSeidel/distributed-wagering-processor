@@ -1,11 +1,11 @@
-import { Injectable, ConflictException, NotFoundException } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { EntityManager, LockMode } from "@mikro-orm/postgresql";
 import { v7 as uuidv7 } from "uuid";
 
 import { Money } from "../../domain/common/money";
 import { WalletBalanceChanged, WagerTransactionProcessed, WagerTransactionRejected, WagerTransactionPendingReference, } from "../../domain/common/integration-event";
 import { hashPayload } from "../../domain/common/canonical-json";
-import { InboxPayloadMismatchError } from "../../domain/exception/inbox-payload-mismatch-error";
+import { IdempotencyConflictError, WalletNotFoundError, CurrencyMismatchError, InboxPayloadMismatchError } from "../../domain/common/errors";
 import { WagerTransaction } from "../../domain/wager/wager-transaction";
 import { WalletLedgerEntry } from "../../domain/wallet/wallet-ledger-entry";
 import type { Wallet } from "../../domain/wallet/wallet";
@@ -120,7 +120,7 @@ export class ProcessWagerUseCase
         if (existingTxEntity)
         {
             const existingTx = DatabaseMapper.toWagerDomain(existingTxEntity);
-            if (!existingTx.matchesPayload(currentPayloadHash)) throw new ConflictException(`A chave '${idempotencyKey}' já foi utilizada com outro payload`);
+            if (!existingTx.matchesPayload(currentPayloadHash)) throw new IdempotencyConflictError(idempotencyKey);
 
             const walletEntity = await em.findOne(WalletEntity, { id: existingTx.walletId });
             const currentBalance = walletEntity ? Money.from({ amount: walletEntity.balance, currency: walletEntity.currency }).toJSON() : input.money;
@@ -135,10 +135,10 @@ export class ProcessWagerUseCase
         }
 
         const walletEntity = await em.findOne(WalletEntity, { id: input.walletId }, { lockMode: LockMode.PESSIMISTIC_WRITE });
-        if (!walletEntity) throw new NotFoundException(`Wallet '${input.walletId}' não encontrada`);
+        if (!walletEntity) throw new WalletNotFoundError(input.walletId);
 
         const wallet = DatabaseMapper.toWalletDomain(walletEntity);
-        if (wallet.currency !== inputMoney.currency) throw new ConflictException(`Moeda (${inputMoney.currency}) não corresponde à carteira (${wallet.currency})`);
+        if (wallet.currency !== inputMoney.currency) throw new CurrencyMismatchError(inputMoney.currency, wallet.currency);
 
         const transactionId = uuidv7();
         const transaction = WagerTransaction.create({

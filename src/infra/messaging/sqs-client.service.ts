@@ -1,5 +1,5 @@
 import { Injectable, type OnModuleInit, Logger } from "@nestjs/common";
-import { SQSClient, SendMessageCommand, CreateQueueCommand, GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
+import { SQSClient, SendMessageCommand, CreateQueueCommand, GetQueueAttributesCommand, type Message } from "@aws-sdk/client-sqs";
 
 @Injectable()
 export class SqsService implements OnModuleInit
@@ -77,5 +77,19 @@ export class SqsService implements OnModuleInit
         });
 
         await this.client.send(command);
+    }
+
+    public async sendToDlq(message: Message, consumerName: string, errorCode: string): Promise<void>
+    {
+        await this.getClient().send(new SendMessageCommand({
+            QueueUrl: this.getDlqUrl(),
+            MessageBody: message.Body || "<empty>",
+            MessageAttributes: {
+                ErrorCode: { DataType: "String", StringValue: errorCode },
+                OriginalSqsMessageId: { DataType: "String", StringValue: message.MessageId ?? "unknown" },
+                ReceiveCount: { DataType: "Number", StringValue: message.Attributes?.ApproximateReceiveCount ?? "1" },
+                Consumer: { DataType: "String", StringValue: consumerName },
+            },
+        }));
     }
 }
