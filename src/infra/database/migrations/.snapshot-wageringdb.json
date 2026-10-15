@@ -970,16 +970,6 @@
           "keyName": "wallet_ledger_entries_pkey",
           "primary": true,
           "unique": true
-        },
-        {
-          "columnNames": [
-            "transaction_id"
-          ],
-          "composite": false,
-          "constraint": true,
-          "keyName": "wallet_ledger_entries_transaction_id_unique",
-          "primary": false,
-          "unique": true
         }
       ],
       "checks": [

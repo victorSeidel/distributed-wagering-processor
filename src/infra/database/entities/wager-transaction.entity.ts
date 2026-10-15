@@ -8,7 +8,7 @@ export const WagerTransactionSchema = defineEntity({
     properties: {
         id: p.uuid().primary(),
         providerId: p.string(),
-        wallet: p.manyToOne(WalletSchema).fieldName("wallet_id").ref().deleteRule("restrict"),
+        walletId: p.manyToOne(WalletSchema).fieldName("wallet_id").mapToPk().deleteRule("restrict"),
 
         externalTransactionId: p.string(),
         referenceExternalTransactionId: p.string().nullable(),
@@ -36,7 +36,7 @@ export const WagerTransactionSchema = defineEntity({
     ],
     indexes: [
         { name: "idx_wagers_reference", properties: ["providerId", "referenceExternalTransactionId"] },
-        { name: "idx_wagers_wallet", properties: ["wallet"] },
+        { name: "idx_wagers_wallet", properties: ["walletId"] },
         { name: "idx_wagers_status", properties: ["status"] },
         {
             name: "uq_wagers_single_reversal_per_reference",

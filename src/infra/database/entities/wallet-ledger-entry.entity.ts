@@ -8,8 +8,8 @@ export const WalletLedgerEntrySchema = defineEntity({
     tableName: "wallet_ledger_entries",
     properties: {
         id: p.uuid().primary(),
-        wallet: p.manyToOne(WalletSchema).fieldName("wallet_id").ref().deleteRule("restrict"),
-        transaction: p.manyToOne(WagerTransactionSchema).fieldName("transaction_id").ref().unique().deleteRule("restrict"),
+        walletId: p.manyToOne(WalletSchema).fieldName("wallet_id").mapToPk().deleteRule("restrict"),
+        transactionId: p.manyToOne(WagerTransactionSchema).fieldName("transaction_id").mapToPk().deleteRule("restrict"),
 
         direction: p.enum(() => LedgerDirection),
 
@@ -22,11 +22,11 @@ export const WalletLedgerEntrySchema = defineEntity({
         createdAt: p.datetime().onCreate(() => new Date()).index(),
     },
     uniques: [
-        { name: "uq_ledger_transaction", properties: ["transaction"] },
+        { name: "uq_ledger_transaction", properties: ["transactionId"] },
     ],
     indexes: [
-        { name: "idx_ledger_wallet", properties: ["wallet"] },
-        { name: "idx_ledger_wallet_created", properties: ["wallet", "createdAt"] },
+        { name: "idx_ledger_wallet", properties: ["walletId"] },
+        { name: "idx_ledger_wallet_created", properties: ["walletId", "createdAt"] },
     ],
     checks: [
         { name: "chk_ledger_amount_positive", expression: "amount > 0" },

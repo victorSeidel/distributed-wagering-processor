@@ -160,11 +160,7 @@ export class ProcessWagerUseCase
 
         if (transaction.requiresReference())
         {
-            const refEntity = await em.findOne(WagerTransactionEntity, {
-                providerId: input.providerId,
-                externalTransactionId: input.referenceExternalTransactionId,
-            });
-
+            const refEntity = await em.findOne(WagerTransactionEntity, { providerId: input.providerId, externalTransactionId: input.referenceExternalTransactionId });
             if (!refEntity)
             {
                 transaction.markPendingReference();
