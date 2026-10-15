@@ -6,7 +6,7 @@ import { hashPayload } from "../../domain/common/canonical-json";
 import { BusinessError, PermanentError, TransientError, InvalidMessageError } from "../../domain/common/errors";
 
 import { SqsService } from "./sqs-client.service";
-import type { InboxContext, ProcessWagerInput, ProcessWagerUseCase } from "../../application/usecase/process-wager.usecase";
+import { ProcessWagerUseCase, type InboxContext, type ProcessWagerInput } from "../../application/usecase/process-wager.usecase";
 
 export interface SqsWagerMessageEnvelope
 {

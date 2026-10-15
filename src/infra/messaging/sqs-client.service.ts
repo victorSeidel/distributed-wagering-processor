@@ -1,5 +1,5 @@
 import { Injectable, type OnModuleInit, Logger } from "@nestjs/common";
-import { SQSClient, SendMessageCommand, CreateQueueCommand, GetQueueAttributesCommand, type Message } from "@aws-sdk/client-sqs";
+import { SQSClient, SendMessageCommand, type Message, GetQueueUrlCommand } from "@aws-sdk/client-sqs";
 
 @Injectable()
 export class SqsService implements OnModuleInit
@@ -9,18 +9,21 @@ export class SqsService implements OnModuleInit
     private queueUrl!: string;
     private dlqUrl!: string;
 
+    private readonly queueName = "wager-transactions.fifo";
+    private readonly dlqName = "wager-transactions-dlq.fifo";
+
     async onModuleInit()
     {
-        const endpoint = process.env.AWS_ENDPOINT || "http://localhost:4566";
-        const region = process.env.AWS_REGION || "us-east-1";
+        const endpoint = process.env.AWS_ENDPOINT!;
+        const region = process.env.AWS_REGION!;
 
         this.client = new SQSClient({
             endpoint,
             region,
-            credentials: { accessKeyId: process.env.AWS_ACCESS_KEY_ID || "test", secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "test" },
+            credentials: { accessKeyId: process.env.AWS_ACCESS_KEY_ID!, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY! },
         });
 
-        await this.ensureQueuesExist();
+        await this.resolveQueueUrls();
     }
 
     public getClient(): SQSClient
@@ -38,32 +41,32 @@ export class SqsService implements OnModuleInit
         return this.dlqUrl;
     }
 
-    private async ensureQueuesExist(): Promise<void>
+    private async resolveQueueUrls(retries = 15, delayMs = 2000): Promise<void>
     {
-        const queueName = "wager-transactions.fifo";
-        const dlqName = "wager-transactions-dlq.fifo";
-
-        try
+        for (let attempt = 1; attempt <= retries; attempt++)
         {
-            const dlqRes = await this.client.send( new CreateQueueCommand({ QueueName: dlqName, Attributes: { FifoQueue: "true", ContentBasedDeduplication: "false" } }));
-            this.dlqUrl = dlqRes.QueueUrl!;
+            try
+            {
+                const [queue, dlq] = await Promise.all([
+                    this.client.send(new GetQueueUrlCommand({ QueueName: this.queueName })),
+                    this.client.send(new GetQueueUrlCommand({ QueueName: this.dlqName })),
+                ]);
 
-            const dlqAttrs = await this.client.send(new GetQueueAttributesCommand({ QueueUrl: this.dlqUrl, AttributeNames: ["QueueArn"] }));
-            const dlqArn = dlqAttrs.Attributes?.QueueArn;
+                this.queueUrl = queue.QueueUrl!;
+                this.dlqUrl = dlq.QueueUrl!;
+                return;
+            }
+            catch (err)
+            {
+                if (attempt === retries)
+                {
+                    this.logger.error(`Não foi possível obter as filas: ${err}`);
+                    throw err;
+                }
 
-            const redrivePolicy = JSON.stringify({ deadLetterTargetArn: dlqArn, maxReceiveCount: "5" });
-            const queueRes = await this.client.send(
-                new CreateQueueCommand({
-                    QueueName: queueName,
-                    Attributes: { FifoQueue: "true", ContentBasedDeduplication: "false", RedrivePolicy: redrivePolicy },
-                })
-            );
-            this.queueUrl = queueRes.QueueUrl!;
-        }
-        catch (err)
-        {
-            this.logger.error(`Erro ao inicializar filas no LocalStack: ${err}`);
-            throw err;
+                this.logger.warn(`Filas indisponíveis (tentativa ${attempt}/${retries}), nova tentativa em ${delayMs}ms`);
+                await new Promise((r) => setTimeout(r, delayMs));
+            }
         }
     }
 

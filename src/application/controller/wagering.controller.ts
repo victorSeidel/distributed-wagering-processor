@@ -8,7 +8,7 @@ import type { SubmitWagerTransactionDto } from "../../model/dto/wager.dto";
 import { WagerTransactionStatus } from "../../model/entity/wager.entity";
 import { WagerTransactionEntity } from "../../infra/database/entities/wager-transaction.entity";
 
-import type { ProcessWagerUseCase } from "../usecase/process-wager.usecase";
+import { ProcessWagerUseCase } from "../usecase/process-wager.usecase";
 
 @Controller()
 @UseGuards(ProviderIdentityGuard)
@@ -22,7 +22,7 @@ export class WageringController
     @Post("wagering/transactions")
     async submitTransaction(@Body() dto: SubmitWagerTransactionDto, @Headers("idempotency-key") idempotencyHeader: string | undefined, @Res() res: Response)
     {
-        const idempotencyKey = idempotencyHeader || `${dto.providerId}:${dto.externalTransactionId}`;;
+        const idempotencyKey = idempotencyHeader;
         if (!idempotencyKey) throw new BadRequestException(`Header 'idempotency-key' é obrigatória`);
 
         const result = await this.processWagerUseCase.execute({ ...dto, idempotencyKey });

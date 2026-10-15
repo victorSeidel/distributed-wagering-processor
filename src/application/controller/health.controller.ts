@@ -3,7 +3,7 @@ import type { Response } from "express";
 import { EntityManager } from "@mikro-orm/postgresql";
 
 import { GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
-import type { SqsService } from "../../infra/messaging/sqs-client.service";
+import { SqsService } from "../../infra/messaging/sqs-client.service";
 
 @Controller("health")
 export class HealthController

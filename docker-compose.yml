@@ -56,11 +56,12 @@ services:
       LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN}
       SERVICES: sqs
       AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      SQS_ENDPOINT_STRATEGY: path
     volumes:
       - "./localstack:/etc/localstack/init/ready.d"
       - "/var/run/docker.sock:/var/run/docker.sock"
     healthcheck:
-      test: ["CMD", "awslocal", "sqs", "list-queues"]
+      test: ["CMD-SHELL", "awslocal sqs get-queue-url --queue-name wager-transactions.fifo"]
       interval: 5s
       timeout: 5s
       retries: 5
