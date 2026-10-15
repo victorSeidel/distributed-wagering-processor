@@ -1,7 +1,8 @@
-import { Controller, Post, Get, Param, Body, Headers, UseGuards, Res, HttpStatus, NotFoundException, } from "@nestjs/common";
+import { Controller, Post, Get, Param, Body, Headers, UseGuards, Res, HttpStatus, NotFoundException, BadRequestException, } from "@nestjs/common";
+import type { Response } from "express";
+
 import { EntityManager } from "@mikro-orm/postgresql";
 import { ProviderIdentityGuard } from "../guard/provider-identity.guard";
-import type { Response } from "express";
 
 import type { SubmitWagerTransactionDto } from "../../model/dto/wager.dto";
 import { WagerTransactionStatus } from "../../model/entity/wager.entity";
@@ -21,7 +22,8 @@ export class WageringController
     @Post("wagering/transactions")
     async submitTransaction(@Body() dto: SubmitWagerTransactionDto, @Headers("idempotency-key") idempotencyHeader: string | undefined, @Res() res: Response)
     {
-        const idempotencyKey = idempotencyHeader || `${dto.providerId}:${dto.externalTransactionId}`;
+        const idempotencyKey = idempotencyHeader || `${dto.providerId}:${dto.externalTransactionId}`;;
+        if (!idempotencyKey) throw new BadRequestException(`Header 'idempotency-key' é obrigatória`);
 
         const result = await this.processWagerUseCase.execute({ ...dto, idempotencyKey });
 

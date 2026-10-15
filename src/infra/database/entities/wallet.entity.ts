@@ -11,7 +11,7 @@ export const WalletSchema = defineEntity({
         balance: p.decimal().precision(18).scale(2),
         version: p.integer().default(1),
 
-        createdAt: p.datetime(),
+        createdAt: p.datetime().onCreate(() => new Date()),
         updatedAt: p.datetime().onCreate(() => new Date()).onUpdate(() => new Date()),
     },
     uniques: [
@@ -19,6 +19,7 @@ export const WalletSchema = defineEntity({
     ],
     checks: [
         { name: "chk_wallet_balance_positive", expression: "balance >= 0.00" },
+        { name: "chk_wallet_currency_format", expression: "currency ~ '^[A-Z]{3}$'" },
     ],
 });
 

@@ -1,5 +1,6 @@
 import { defineEntity, p } from "@mikro-orm/core";
 import { WagerFailureCode, WagerTransactionKind, WagerTransactionStatus } from "../../../model/entity/wager.entity";
+import { WalletSchema } from "./wallet.entity";
 
 export const WagerTransactionSchema = defineEntity({
     name: "WagerTransactionEntity",
@@ -7,7 +8,7 @@ export const WagerTransactionSchema = defineEntity({
     properties: {
         id: p.uuid().primary(),
         providerId: p.string(),
-        walletId: p.uuid().index(),
+        wallet: p.manyToOne(WalletSchema).fieldName("wallet_id").ref().deleteRule("restrict"),
 
         externalTransactionId: p.string(),
         referenceExternalTransactionId: p.string().nullable(),
@@ -24,7 +25,7 @@ export const WagerTransactionSchema = defineEntity({
         amount: p.decimal().precision(18).scale(2),
         currency: p.string().length(3),
 
-        status: p.enum(() => WagerTransactionStatus).default(WagerTransactionStatus.Pending).index(),
+        status: p.enum(() => WagerTransactionStatus).default(WagerTransactionStatus.Pending),
         failureCode: p.enum(() => WagerFailureCode).nullable(),
 
         processedAt: p.datetime().nullable(),
@@ -35,7 +36,7 @@ export const WagerTransactionSchema = defineEntity({
     ],
     indexes: [
         { name: "idx_wagers_reference", properties: ["providerId", "referenceExternalTransactionId"] },
-        { name: "idx_wagers_wallet", properties: ["walletId"] },
+        { name: "idx_wagers_wallet", properties: ["wallet"] },
         { name: "idx_wagers_status", properties: ["status"] },
         {
             name: "uq_wagers_single_reversal_per_reference",
@@ -45,7 +46,10 @@ export const WagerTransactionSchema = defineEntity({
                 `on "wager_transactions" ("reference_transaction_id", "kind") ` +
                 `where "status" = 'PROCESSED' and "kind" in ('REFUND', 'ROLLBACK')`,
         },
-    ]
+    ],
+    checks: [
+        { name: "chk_wager_amount_positive", expression: "amount > 0" },
+    ],
 });
 
 export class WagerTransactionEntity extends WagerTransactionSchema.class {}

@@ -10,9 +10,6 @@ export const InboxMessageSchema = defineEntity({
         receivedAt: p.datetime().onCreate(() => new Date()),
         processedAt: p.datetime().nullable(),
     },
-    uniques: [
-        { name: "uk_inbox_messages_consumer_message", properties: ["consumerName", "messageId"] },
-    ]
 });
 
 export class InboxMessageEntity extends InboxMessageSchema.class {}
@@ -34,7 +31,10 @@ export const OutboxMessageSchema = defineEntity({
     },
     indexes: [
         { name: "idx_outbox_due", properties: ["publishedAt", "nextAttemptAt"] },
-    ]
+    ],
+    checks: [
+        { name: "chk_outbox_attempts_non_negative", expression: "attempts >= 0" },
+    ],
 });
 
 export class OutboxMessageEntity extends OutboxMessageSchema.class {}

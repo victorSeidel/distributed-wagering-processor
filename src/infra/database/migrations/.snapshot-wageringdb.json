@@ -15,7 +15,7 @@
           "autoincrement": false,
           "primary": true,
           "nullable": false,
-          "unique": true,
+          "unique": false,
           "length": 255,
           "precision": null,
           "scale": null,
@@ -104,17 +104,6 @@
           "constraint": true,
           "keyName": "inbox_messages_pkey",
           "primary": true,
-          "unique": true
-        },
-        {
-          "columnNames": [
-            "consumer_name",
-            "message_id"
-          ],
-          "composite": true,
-          "constraint": true,
-          "keyName": "uk_inbox_messages_consumer_message",
-          "primary": false,
           "unique": true
         }
       ],
@@ -307,7 +296,13 @@
           "unique": false
         }
       ],
-      "checks": [],
+      "checks": [
+        {
+          "name": "chk_outbox_attempts_non_negative",
+          "expression": "attempts >= 0",
+          "definition": "check (attempts >= 0)"
+        }
+      ],
       "triggers": [],
       "foreignKeys": {},
       "comment": null
@@ -719,29 +714,14 @@
           "keyName": "wager_transactions_pkey",
           "primary": true,
           "unique": true
-        },
-        {
-          "columnNames": [
-            "status"
-          ],
-          "composite": false,
-          "constraint": false,
-          "keyName": "wager_transactions_status_index",
-          "primary": false,
-          "unique": false
-        },
-        {
-          "columnNames": [
-            "wallet_id"
-          ],
-          "composite": false,
-          "constraint": false,
-          "keyName": "wager_transactions_wallet_id_index",
-          "primary": false,
-          "unique": false
         }
       ],
       "checks": [
+        {
+          "name": "chk_wager_amount_positive",
+          "expression": "amount > 0",
+          "definition": "check (amount > 0)"
+        },
         {
           "name": "wager_transactions_failure_code_check",
           "expression": "\"failure_code\" in ('INSUFFICIENT_FUNDS', 'REFERENCE_NOT_FOUND', 'REFERENCE_ALREADY_REVERSED', 'INVALID_REFERENCE_TYPE', 'INVALID_CURRENCY', 'REVERSAL_WOULD_PRODUCE_NEGATIVE_BALANCE', 'AMOUNT_MISMATCH', 'IDEMPOTENCY_CONFLICT')",
@@ -762,7 +742,20 @@
         }
       ],
       "triggers": [],
-      "foreignKeys": {},
+      "foreignKeys": {
+        "wager_transactions_wallet_id_foreign": {
+          "columnNames": [
+            "wallet_id"
+          ],
+          "constraintName": "wager_transactions_wallet_id_foreign",
+          "localTableName": "public.wager_transactions",
+          "referencedColumnNames": [
+            "id"
+          ],
+          "referencedTableName": "public.wallets",
+          "deleteRule": "restrict"
+        }
+      },
       "comment": null
     },
     {
@@ -929,6 +922,16 @@
       "indexes": [
         {
           "columnNames": [
+            "wallet_id"
+          ],
+          "composite": false,
+          "constraint": false,
+          "keyName": "idx_ledger_wallet",
+          "primary": false,
+          "unique": false
+        },
+        {
+          "columnNames": [
             "wallet_id",
             "created_at"
           ],
@@ -937,6 +940,16 @@
           "keyName": "idx_ledger_wallet_created",
           "primary": false,
           "unique": false
+        },
+        {
+          "columnNames": [
+            "transaction_id"
+          ],
+          "composite": false,
+          "constraint": true,
+          "keyName": "uq_ledger_transaction",
+          "primary": false,
+          "unique": true
         },
         {
           "columnNames": [
@@ -967,19 +980,29 @@
           "keyName": "wallet_ledger_entries_transaction_id_unique",
           "primary": false,
           "unique": true
-        },
-        {
-          "columnNames": [
-            "wallet_id"
-          ],
-          "composite": false,
-          "constraint": false,
-          "keyName": "wallet_ledger_entries_wallet_id_index",
-          "primary": false,
-          "unique": false
         }
       ],
       "checks": [
+        {
+          "name": "chk_ledger_amount_positive",
+          "expression": "amount > 0",
+          "definition": "check (amount > 0)"
+        },
+        {
+          "name": "chk_ledger_balance_after_non_negative",
+          "expression": "balance_after >= 0",
+          "definition": "check (balance_after >= 0)"
+        },
+        {
+          "name": "chk_ledger_balance_arithmetic",
+          "expression": "(direction = 'CREDIT' and balance_after = balance_before + amount) or (direction = 'DEBIT' and balance_after = balance_before - amount)",
+          "definition": "check ((direction = 'CREDIT' and balance_after = balance_before + amount) or (direction = 'DEBIT' and balance_after = balance_before - amount))"
+        },
+        {
+          "name": "chk_ledger_balance_before_non_negative",
+          "expression": "balance_before >= 0",
+          "definition": "check (balance_before >= 0)"
+        },
         {
           "name": "wallet_ledger_entries_direction_check",
           "expression": "\"direction\" in ('DEBIT', 'CREDIT')",
@@ -999,7 +1022,32 @@
           "body": "RAISE EXCEPTION 'Lançamentos contábeis no ledger são estritamente imutáveis. Operações de UPDATE ou DELETE são proibidas'; RETURN OLD;"
         }
       ],
-      "foreignKeys": {},
+      "foreignKeys": {
+        "wallet_ledger_entries_transaction_id_foreign": {
+          "columnNames": [
+            "transaction_id"
+          ],
+          "constraintName": "wallet_ledger_entries_transaction_id_foreign",
+          "localTableName": "public.wallet_ledger_entries",
+          "referencedColumnNames": [
+            "id"
+          ],
+          "referencedTableName": "public.wager_transactions",
+          "deleteRule": "restrict"
+        },
+        "wallet_ledger_entries_wallet_id_foreign": {
+          "columnNames": [
+            "wallet_id"
+          ],
+          "constraintName": "wallet_ledger_entries_wallet_id_foreign",
+          "localTableName": "public.wallet_ledger_entries",
+          "referencedColumnNames": [
+            "id"
+          ],
+          "referencedTableName": "public.wallets",
+          "deleteRule": "restrict"
+        }
+      },
       "comment": null
     },
     {
@@ -1154,6 +1202,11 @@
           "name": "chk_wallet_balance_positive",
           "expression": "balance >= 0.00",
           "definition": "check (balance >= 0.00)"
+        },
+        {
+          "name": "chk_wallet_currency_format",
+          "expression": "currency ~ '^[A-Z]{3}$'",
+          "definition": "check (currency ~ '^[A-Z]{3}$')"
         }
       ],
       "triggers": [],

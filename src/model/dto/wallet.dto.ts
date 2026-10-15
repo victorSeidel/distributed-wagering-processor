@@ -12,7 +12,7 @@ export interface OpenWalletDto
 {
     id: string;
     playerId: string;
-    initialBalance: MoneyType;
+    initialBalance: Money;
 }
 
 export interface WalletState
