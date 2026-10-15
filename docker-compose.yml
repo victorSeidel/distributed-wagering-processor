@@ -1,16 +1,26 @@
-version: '3.8'
-
 services:
+  migrate:
+    container_name: jungle_migrate
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    env_file:
+      - .env.docker
+    command: ["bun", "src/migrate.ts"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: jungle_app
     restart: unless-stopped
     env_file:
-      - .env
-    ports:
-      - "3000:3000"
+      - .env.docker
+    expose:
+      - "3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -21,9 +31,11 @@ services:
     image: postgres:16-alpine
     container_name: jungle_postgres
     restart: unless-stopped
+    env_file:
+      - .env.docker
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgrespassword}
+      POSTGRES_PASSWORD: ${DB_PASS:-postgrespassword}
       POSTGRES_DB: ${DB_NAME:-wageringdb}
     ports:
       - "5432:5432"
