@@ -1,19 +1,21 @@
+import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
-import { Logger } from "@nestjs/common";
 
 import { AppModule } from "./app.module";
+import { JsonLogger } from "./infra/observability/json-logger";
 
 async function bootstrap()
 {
-    const logger = new Logger("Bootstrap");
-
-    const app = await NestFactory.create(AppModule);
+    const app = await NestFactory.create(AppModule, { bufferLogs: true });
     app.enableShutdownHooks();
 
-    const port = process.env.PORT || 3000;
-    await app.listen(port);
+    const logger = app.get(JsonLogger);
+    app.useLogger(logger);
     
-    logger.log(`Servidor rodando na porta ${port}`);
+    const port = Number(process.env.PORT) || 3000;
+    await app.listen(port);
+
+    logger.info("Servidor iniciado", { port });
 }
 
 bootstrap();

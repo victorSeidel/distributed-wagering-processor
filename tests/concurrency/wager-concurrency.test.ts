@@ -1,43 +1,31 @@
 import { describe, expect, it, beforeAll, afterAll } from "bun:test";
 
-import { MikroORM } from "@mikro-orm/postgresql";
-import mikroOrmConfig from "../../mikro-orm.config";
-
 import { v7 as uuidv7 } from "uuid";
 
-import { WagerFailureCode, WagerTransactionKind, WagerTransactionStatus } from "../../src/model/entity/wager.entity";
+import { createTestContext, type TestContext } from "../support/test-context";
 
-import { OpenWalletUseCase } from "../../src/application/usecase/open-wallet.usecase";
-import { WagerSettlementService } from "../../src/application/service/wager-settlement.service";
-import { ProcessWagerUseCase } from "../../src/application/usecase/process-wager.usecase";
-import { ReconcileWalletUseCase } from "../../src/application/usecase/reconcile-wallet.usecase";
+import { WagerFailureCode, WagerTransactionKind, WagerTransactionStatus } from "../../src/domain/wager/wager-transaction.types";
 
-describe("Testes Obrigatórios de Concorrência e Integridade Contábil", () =>
+describe("Testes de Concorrência e Integridade Contábil", () =>
 {
-    let orm: MikroORM;
-    let openWalletUseCase: OpenWalletUseCase;
-    let processWagerUseCase: ProcessWagerUseCase;
-    let reconcileWalletUseCase: ReconcileWalletUseCase;
+    let ctx: TestContext;
 
     beforeAll(async () =>
     {
-        orm = await MikroORM.init(mikroOrmConfig);
-        openWalletUseCase = new OpenWalletUseCase(orm.em);
-        processWagerUseCase = new ProcessWagerUseCase(orm.em, new WagerSettlementService());
-        reconcileWalletUseCase = new ReconcileWalletUseCase(orm.em);
+        ctx = await createTestContext();
     });
 
     afterAll(async () =>
     {
-        await orm.close(true);
+        await ctx.close();
     });
 
-    it("Cenário Obrigatório Seção 8: 100.00 BRL com duas apostas simultâneas de 80.00 BRL", async () =>
+    it("100.00 BRL com duas apostas simultâneas de 80.00 BRL", async () =>
     {
         const playerId = uuidv7();
-        const wallet = await openWalletUseCase.execute({ playerId, initialBalance: { amount: "100.00", currency: "BRL" } });
+        const wallet = await ctx.openWallet.execute({ playerId, initialBalance: { amount: "100.00", currency: "BRL" } });
 
-        const promiseA = processWagerUseCase.execute({
+        const promiseA = ctx.processWager.execute({
             providerId: "provider-concurrency",
             externalTransactionId: `bet-a-${uuidv7()}`,
             idempotencyKey: `idemp-a-${uuidv7()}`,
@@ -49,7 +37,7 @@ describe("Testes Obrigatórios de Concorrência e Integridade Contábil", () =>
             money: { amount: "80.00", currency: "BRL" },
         });
 
-        const promiseB = processWagerUseCase.execute({
+        const promiseB = ctx.processWager.execute({
             providerId: "provider-concurrency",
             externalTransactionId: `bet-b-${uuidv7()}`,
             idempotencyKey: `idemp-b-${uuidv7()}`,
@@ -69,7 +57,7 @@ describe("Testes Obrigatórios de Concorrência e Integridade Contábil", () =>
         const rejected = resA.status === WagerTransactionStatus.Rejected ? resA : resB;
         expect(rejected.failureCode).toBe(WagerFailureCode.InsufficientFunds);
 
-        const reconciliation = await reconcileWalletUseCase.execute(wallet.id);
+        const reconciliation = await ctx.reconcile.execute(wallet.id);
         expect(reconciliation.storedBalance.amount).toBe("20.00");
         expect(reconciliation.calculatedBalance.amount).toBe("20.00");
         expect(reconciliation.difference.amount).toBe("0.00");
@@ -78,16 +66,16 @@ describe("Testes Obrigatórios de Concorrência e Integridade Contábil", () =>
         expect(reconciliation.checkedEntries).toBe(2);
     });
 
-    it("Cenário Obrigatório Seção 13: A mesma aposta enviada 50 vezes em paralelo resulta em apenas 1 débito", async () =>
+    it("A mesma aposta enviada 50 vezes em paralelo resulta em apenas 1 débito", async () =>
     {
         const playerId = uuidv7();
-        const wallet = await openWalletUseCase.execute({ playerId, initialBalance: { amount: "500.00", currency: "BRL" } });
+        const wallet = await ctx.openWallet.execute({ playerId, initialBalance: { amount: "500.00", currency: "BRL" } });
 
         const fixedExternalId = `tx-50-parallel-${uuidv7()}`;
         const fixedIdempotencyKey = `idemp-50-${fixedExternalId}`;
 
         const requests = Array.from({ length: 50 }, () =>
-            processWagerUseCase.execute({
+            ctx.processWager.execute({
                 providerId: "provider-idempotency",
                 externalTransactionId: fixedExternalId,
                 idempotencyKey: fixedIdempotencyKey,
@@ -114,7 +102,7 @@ describe("Testes Obrigatórios de Concorrência e Integridade Contábil", () =>
         expect(originalCount).toBe(1);
         expect(replayCount).toBe(49);
 
-        const reconciliation = await reconcileWalletUseCase.execute(wallet.id);
+        const reconciliation = await ctx.reconcile.execute(wallet.id);
         expect(reconciliation.storedBalance.amount).toBe("490.00");
         expect(reconciliation.calculatedBalance.amount).toBe("490.00");
         expect(reconciliation.consistent).toBe(true);

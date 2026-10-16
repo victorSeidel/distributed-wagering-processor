@@ -1,8 +1,30 @@
-import type { Money } from "../common/money";
-import { LedgerInvariantError } from "../common/errors";
+import type { Money } from "../shared/money";
+import { LedgerInvariantError } from "../shared/errors";
+import { LedgerDirection } from "./ledger-direction";
 
-import { type CreateLedgerEntryDto, type LedgerEntryState } from "../../model/dto/wallet.dto";
-import { LedgerDirection } from "../../model/type/wallet.type";
+export interface CreateLedgerEntryProps
+{
+    id: string;
+    walletId: string;
+    transactionId: string;
+    direction: LedgerDirection;
+    money: Money;
+    balanceBefore: Money;
+    balanceAfter: Money;
+    createdAt?: Date;
+}
+
+export interface LedgerEntryState
+{
+    id: string;
+    walletId: string;
+    transactionId: string;
+    direction: LedgerDirection;
+    money: Money;
+    balanceBefore: Money;
+    balanceAfter: Money;
+    createdAt: Date;
+}
 
 export class WalletLedgerEntry
 {
@@ -17,19 +39,21 @@ export class WalletLedgerEntry
         public readonly createdAt: Date,
     ) {}
 
-    public static create(dto: CreateLedgerEntryDto): WalletLedgerEntry
+    public static create(props: CreateLedgerEntryProps): WalletLedgerEntry
     {
         const entry = new WalletLedgerEntry(
-            dto.id,
-            dto.walletId,
-            dto.transactionId,
-            dto.direction,
-            dto.money,
-            dto.balanceBefore,
-            dto.balanceAfter, new Date()
+            props.id,
+            props.walletId,
+            props.transactionId,
+            props.direction,
+            props.money,
+            props.balanceBefore,
+            props.balanceAfter,
+            props.createdAt ?? new Date(),
         );
 
-        if (!entry.isBalanced()) throw new LedgerInvariantError(`Invariante violada: before (${dto.balanceBefore}) ± money (${dto.money}) !== after (${dto.balanceAfter})`);
+        if (!entry.money.isPositive()) throw new LedgerInvariantError("Lançamento do ledger exige valor positivo");
+        if (!entry.isBalanced()) throw new LedgerInvariantError(`Invariante violada: before (${props.balanceBefore}) ± money (${props.money}) !== after (${props.balanceAfter})`);
 
         return entry;
     }

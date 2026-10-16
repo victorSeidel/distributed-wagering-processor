@@ -1,21 +1,21 @@
-# dependencies
+# Dependencies
 node_modules
 
-# output
+# Output
 out
 dist
 *.tgz
 
-# code coverage
+# Coverage
 coverage
 *.lcov
 
-# logs
+# Logs
 logs
 _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
-# environment variable
+# ENVs
 .env
 .env.*
 .env.development.local
@@ -24,7 +24,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.local
 !.env.example
 
-# caches
+# Caches
 .eslintcache
 .cache
 *.tsbuildinfo

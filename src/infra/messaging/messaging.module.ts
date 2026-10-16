@@ -1,15 +1,29 @@
-import { Module } from "@nestjs/common";
+import { Global, Module } from "@nestjs/common";
 
-import { SqsService } from "./sqs-client.service";
-import { SqsConsumerService } from "./sqs-consumer.service";
+import { ApplicationModule } from "../../application/application.module";
+import { IntegrationEventPublisher } from "../../application/ports/messaging.port";
 
-import { OutboxRelayWorker } from "../worker/outbox-relay.worker";
-import { WagerSettlementService } from "../../application/service/wager-settlement.service";
-import { ProcessWagerUseCase } from "../../application/usecase/process-wager.usecase";
+import { SqsClientService } from "./sqs/sqs-client.service";
+import { SqsCommandConsumer } from "./sqs/sqs-command-consumer";
+import { SqsEventPublisher } from "./sqs/sqs-event-publisher";
 
+@Global()
 @Module({
-    providers: [SqsService, OutboxRelayWorker, SqsConsumerService, ProcessWagerUseCase, WagerSettlementService],
-    exports: [SqsService, OutboxRelayWorker],
+    imports: [
+        ApplicationModule,
+    ],
+    
+    providers: [
+        SqsClientService,
+        SqsEventPublisher,
+        SqsCommandConsumer,
+        { provide: IntegrationEventPublisher, useExisting: SqsEventPublisher },
+    ],
+
+    exports: [
+        SqsClientService,
+        IntegrationEventPublisher,
+    ],
 })
 
 export class MessagingModule {}
