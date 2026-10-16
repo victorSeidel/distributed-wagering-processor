@@ -10,7 +10,7 @@
         "test": "bun test tests/unit",
         "test:integration": "bun test tests/integration",
         "test:concurrency": "bun test tests/concurrency",
-        "infra:up": "docker compose up -d",
+        "infra:up": "docker compose up -d --wait postgres localstack",
         "infra:down": "docker compose down -v",
         "migration": "bun src/migrate.ts",
         "migration:create": "bunx --bun mikro-orm migration:create",
